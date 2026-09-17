@@ -1,0 +1,6 @@
+node_modules
+.eol
+src-video
+dist
+package-lock.json
+PRD.md

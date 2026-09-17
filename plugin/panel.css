@@ -1,0 +1,147 @@
+body {
+  background: #171c21;
+  color: #e4e8eb;
+  font-size: 12px;
+  font-family: Arial, sans-serif;
+  margin: 0;
+}
+.panel {
+  padding: 18px;
+  overflow-y: auto;
+  height: 100vh;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  color: #ddbc79;
+  font-size: 22px;
+}
+.brand span {
+  color: #74766b;
+}
+.brand strong {
+  margin-left: 12px;
+  font-size: 15px;
+  color: #edf0f2;
+}
+.brand small {
+  font-size: 9px;
+  color: #84929d;
+  margin-left: 12px;
+}
+.subtitle {
+  font-size: 11px;
+  color: #91a0ad;
+  margin: 9px 0 20px;
+}
+.section {
+  padding: 14px;
+  background: #20272d;
+  border: 1px solid #34404a;
+  border-radius: 7px;
+  margin-bottom: 12px;
+}
+.heading {
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+.heading span {
+  margin-left: 12px;
+  color: #99b8a4;
+  font-weight: normal;
+  font-size: 10px;
+}
+.heading.small {
+  font-size: 10px;
+  margin-top: 14px;
+}
+.hint {
+  font-size: 10px;
+  color: #9aa8b4;
+  line-height: 1.7;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+button {
+  background: #303b44;
+  color: #e3e8ed;
+  border: 1px solid #46535f;
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin: 4px 4px 4px 0;
+  font-size: 11px;
+}
+.primary {
+  background: #ddbc79;
+  color: #252117;
+  font-weight: bold;
+  width: 100%;
+  margin-top: 12px;
+}
+button:disabled {
+  opacity: 0.4;
+}
+input,
+select {
+  background: #131a20;
+  color: #e0e7ed;
+  border: 1px solid #4a5864;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 11px;
+}
+select {
+  width: 100%;
+  margin: 7px 0;
+}
+.row {
+  display: flex;
+}
+.row label {
+  flex: 1;
+  font-size: 10px;
+  color: #acb8c2;
+  margin-right: 7px;
+}
+.row input {
+  width: 100%;
+  margin-top: 6px;
+}
+.types {
+  display: flex;
+  margin: 12px 0;
+}
+.types label {
+  font-size: 11px;
+  margin-right: 12px;
+}
+.types input {
+  margin-right: 5px;
+}
+.event {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #36414b;
+  padding: 7px 0;
+  font-size: 11px;
+}
+.event span {
+  flex: 1;
+  margin-left: 8px;
+}
+.event button {
+  padding: 3px 6px;
+}
+.event.review {
+  color: #e7c388;
+}
+#events {
+  max-height: 200px;
+  overflow-y: auto;
+}
+#message {
+  color: #e7c388;
+  font-size: 11px;
+  white-space: pre-wrap;
+  margin: 10px 0 20px;
+}

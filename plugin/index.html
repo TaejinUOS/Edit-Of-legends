@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <div class="brand">E<span>∕</span>L <strong>EditOfLegends</strong><small>MVP 0.1</small></div>
+      <p class="subtitle">좋은 플레이만, 타임라인으로.</p>
+      <div class="section">
+        <div class="heading">엔진 연결 <span id="health">연결 안 됨</span></div>
+        <button id="connect">연결 파일 선택</button>
+        <p class="hint">로컬 엔진을 실행한 후 .eol/connection.json을 선택하세요.</p>
+      </div>
+      <div class="section">
+        <div class="heading">01 · 원본</div>
+        <button id="source">선택 클립 불러오기</button>
+        <p id="source-info" class="hint">타임라인에서 녹화 클립 하나를 선택하세요.</p>
+        <button id="review">넓은 화면에서 검토 ↗</button>
+      </div>
+      <div class="section">
+        <div class="heading">02 · 분석 설정</div>
+        <div class="row">
+          <label>이전 (초)<input id="before" type="number" value="11" min="0" max="120" /></label
+          ><label>이후 (초)<input id="after" type="number" value="7" min="0" max="120" /></label
+          ><label>동시 판정<input id="gap" type="number" value="15" min="0" max="60" /></label>
+        </div>
+        <div class="types">
+          <label><input id="kill" type="checkbox" checked />킬 V1</label
+          ><label><input id="assist" type="checkbox" checked />어시 V2</label
+          ><label><input id="death" type="checkbox" checked />데스 V3</label>
+        </div>
+        <label class="hint"
+          >분석 워커<select id="workers">
+            <option value="auto">자동</option>
+            <option>1</option>
+            <option>2</option>
+            <option>4</option>
+            <option>8</option>
+          </select></label
+        >
+        <div class="heading small">HUD 영역 (화면 비율 %)</div>
+        <div class="row roi">
+          <label>X<input id="x" value="86.7" type="number" step="0.1" /></label
+          ><label>Y<input id="y" value="0.1" type="number" step="0.1" /></label
+          ><label>너비<input id="width" value="3.9" type="number" step="0.1" /></label
+          ><label>높이<input id="height" value="2.2" type="number" step="0.1" /></label>
+        </div>
+        <button id="analyze" class="primary">녹화본 분석</button
+        ><button id="cancel">분석 / 생성 취소</button>
+        <p id="progress" class="hint"></p>
+      </div>
+      <div class="section">
+        <div class="heading">03 · 검토 및 생성</div>
+        <select id="jobs">
+          <option value="">완료된 작업 선택</option></select
+        ><button id="refresh">작업 새로고침</button
+        ><button id="load-job">선택 작업 불러오기</button>
+        <p id="summary" class="hint">저장된 이벤트 수정 사항을 함께 불러옵니다.</p>
+        <div id="events"></div>
+        <button id="generate" class="primary">새 시퀀스 생성</button>
+        <p class="hint">
+          원본 소스와 오디오로 새 시퀀스를 만듭니다. 기존 효과·자막은 복제하지 않습니다.
+        </p>
+      </div>
+      <p id="message"></p>
+    </div>
+    <script src="panel.js"></script>
+  </body>
+</html>

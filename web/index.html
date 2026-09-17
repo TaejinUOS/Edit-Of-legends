@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EditOfLegends · 컷 편집</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/" aria-label="EditOfLegends"
+        ><span class="brand-icon">E<span>∕</span>L</span>
+        <div>EditOfLegends<small>LEAGUE OF LEGENDS · ROUGH CUT</small></div></a
+      >
+      <div class="header-right">
+        <span id="engine-state" class="status">연결 확인 중</span
+        ><span class="version">MVP 0.1</span>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <div class="eyebrow">YOUR GAME. YOUR HIGHLIGHTS.</div>
+          <h1>좋은 플레이만, 타임라인으로.</h1>
+          <p>녹화본에서 K/D/A 장면을 찾고, 원하는 컷으로 정리하세요.</p>
+        </div>
+        <button id="connection-button" class="quiet">엔진 연결 파일</button
+        ><input type="file" id="connection-file" accept=".json" hidden />
+      </section>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section class="source-bar">
+        <div class="source-icon">▱</div>
+        <div class="source-copy">
+          <strong id="source-name">녹화본을 선택하세요</strong
+          ><span id="source-meta">MP4 · H.264 · 1080p / 1440p · 30 / 60fps</span>
+        </div>
+        <select id="files" aria-label="예시 녹화본">
+          <option value="">로컬 녹화본 선택</option></select
+        ><button id="load-file" class="secondary">불러오기</button>
+      </section>
+      <details class="path-input">
+        <summary>다른 파일 경로 / 분석 범위</summary>
+        <div class="inline">
+          <input id="path" placeholder="C:\Videos\game.mp4" aria-label="영상 절대 경로" /><label
+            >시작 (초)<input id="source-in" type="number" value="0" min="0" step="0.1" /></label
+          ><label
+            >끝 (초)<input
+              id="source-out"
+              type="number"
+              min="0"
+              step="0.1"
+              placeholder="영상 끝" /></label
+          ><button id="load-path" class="secondary">경로로 불러오기</button>
+        </div>
+      </details>
+      <div class="workspace">
+        <section class="editor">
+          <div class="section-heading">
+            <h2>미리보기</h2>
+            <span id="time-label" class="mono">00:00.0</span>
+          </div>
+          <div class="viewer">
+            <video id="video" controls preload="metadata" hidden></video>
+            <div id="empty-view">
+              <span class="play-outline">▷</span>
+              <h3>다음 하이라이트가 기다리고 있어요</h3>
+              <p>녹화본을 불러와 장면을 확인하세요.</p>
+            </div>
+          </div>
+          <div class="viewer-footer">
+            <span>원본 영상은 수정되지 않습니다</span
+            ><button id="roi-open" class="quiet" disabled>HUD 영역 설정 ↗</button>
+          </div>
+          <div id="roi-editor" hidden>
+            <div class="section-heading">
+              <h3>K/D/A 숫자 영역</h3>
+              <button id="roi-close" class="quiet">닫기</button>
+            </div>
+            <p class="muted">
+              세 숫자와 /만 포함하도록 아래 화면에서 드래그하세요. 팀 킬 수는 제외합니다.
+            </p>
+            <div id="roi-image-wrap">
+              <img id="roi-image" alt="HUD 영역 선택용 현재 프레임" draggable="false" />
+              <div id="roi-box"></div>
+            </div>
+            <div class="roi-values">
+              <label>X %<input id="roi-x" type="number" step="0.1" /></label
+              ><label>Y %<input id="roi-y" type="number" step="0.1" /></label
+              ><label>너비 %<input id="roi-width" type="number" step="0.1" /></label
+              ><label>높이 %<input id="roi-height" type="number" step="0.1" /></label>
+            </div>
+            <div class="inline">
+              <button id="roi-reset" class="quiet">기본 영역</button
+              ><button id="ocr-test" class="secondary">이 프레임 판독</button
+              ><span id="ocr-result" class="mono muted">—</span>
+            </div>
+          </div>
+          <div class="results-heading">
+            <div>
+              <h2>장면 목록 <span id="event-count" class="count">0</span></h2>
+              <p id="result-description">분석이 끝나면 감지한 장면이 여기에 표시됩니다.</p>
+            </div>
+            <button id="add-event" class="quiet" disabled>＋ 이벤트 추가</button>
+          </div>
+          <div class="tabs" role="group" aria-label="결과 보기">
+            <button class="tab active" data-tab="events">이벤트 검토</button
+            ><button class="tab" data-tab="clips">생성할 컷</button
+            ><span id="save-state">자동 저장</span>
+          </div>
+          <div id="event-list" class="event-list">
+            <div class="empty-list">아직 분석한 장면이 없습니다.</div>
+          </div>
+          <div id="clip-list" class="event-list" hidden></div>
+        </section>
+        <aside>
+          <section class="card">
+            <div class="card-title">
+              <span class="step">01</span>
+              <h2>컷 설정</h2>
+            </div>
+            <p class="label">포함할 이벤트</p>
+            <div class="type-options">
+              <label class="kill"
+                ><input type="checkbox" name="type" value="kill" checked />킬 <span>V1</span></label
+              ><label class="assist"
+                ><input type="checkbox" name="type" value="assist" checked />어시스트
+                <span>V2</span></label
+              ><label class="death"
+                ><input type="checkbox" name="type" value="death" checked />데스
+                <span>V3</span></label
+              >
+            </div>
+            <div class="timing">
+              <label
+                >이벤트 이전<input
+                  id="before"
+                  type="number"
+                  min="0"
+                  max="120"
+                  step="0.1"
+                  value="11"
+                /><span>초</span></label
+              ><label
+                >이벤트 이후<input
+                  id="after"
+                  type="number"
+                  min="0"
+                  max="120"
+                  step="0.1"
+                  value="7"
+                /><span>초</span></label
+              >
+            </div>
+            <div class="context-bar">
+              <span>이전 11초</span><i></i><b>이벤트</b><i></i><span>이후 7초</span>
+            </div>
+            <label class="field-row"
+              >동시 판정 시간
+              <div>
+                <input id="gap" type="number" min="0" max="60" step="0.1" value="15" /><span
+                  >초</span
+                >
+              </div></label
+            >
+            <p class="hint">
+              가까운 이벤트와 겹치는 구간을 합칩니다.<br />대표 유형: 킬 → 어시스트 → 데스
+            </p>
+            <div class="divider"></div>
+            <label class="field-row"
+              >분석 워커<select id="workers">
+                <option value="auto">자동 (권장)</option>
+                <option>1</option>
+                <option>2</option>
+                <option>4</option>
+                <option>8</option>
+              </select></label
+            >
+            <button id="analyze" class="primary" disabled>✦ 녹화본 분석</button
+            ><button id="cancel" class="secondary full" hidden>분석 취소</button>
+            <div id="progress-area" hidden>
+              <div class="progress-copy">
+                <span id="stage">준비</span><span id="percent" class="mono">0%</span>
+              </div>
+              <progress id="progress" max="1" value="0"></progress>
+              <p id="elapsed" class="hint"></p>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-title">
+              <span class="step">02</span>
+              <h2>편집 결과</h2>
+            </div>
+            <div class="stats">
+              <div><strong id="cut-count">—</strong><span>개의 컷</span></div>
+              <div><strong id="cut-duration">—</strong><span>예상 길이</span></div>
+            </div>
+            <div id="timeline" class="timeline"><span>분석 후 확인할 수 있습니다</span></div>
+            <div class="legend">
+              <span class="kill">● 킬</span><span class="assist">● 어시스트</span
+              ><span class="death">● 데스</span>
+            </div>
+            <button id="export" class="secondary full" disabled>편집 계획 저장 ↓</button>
+            <p class="hint">
+              Premiere 패널에서 같은 작업을 선택한 뒤<br /><strong>새 시퀀스 생성</strong>을
+              누르세요.
+            </p>
+          </section>
+          <section class="card recent">
+            <h2>최근 작업</h2>
+            <select id="recent-jobs" aria-label="최근 분석 작업">
+              <option value="">저장된 작업 선택</option></select
+            ><button id="restore" class="quiet">작업 불러오기 ↗</button>
+          </section>
+          <p class="local-note">◉ 내 컴퓨터에서만 처리됩니다.<br />영상 업로드 없이, 로컬 분석.</p>
+        </aside>
+      </div>
+    </main>
+    <footer>EditOfLegends <span>플레이의 순간을, 편집의 시작으로.</span></footer>
+    <script src="/app.js"></script>
+  </body>
+</html>

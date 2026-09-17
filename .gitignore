@@ -1,0 +1,7 @@
+node_modules/
+.eol/
+dist/
+src-video/
+*.log
+*.traineddata
+.DS_Store
