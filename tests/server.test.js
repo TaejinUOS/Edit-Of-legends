@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { createApp, atomicJson } from '../engine/server.js';
-test('loopback API enforces auth, host and origin; validates before mutations and persists edits', async () => {
+test('loopback API enforces auth and host; supports UXP CORS; validates before mutations and persists edits', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'eol-test-'));
   const app = await createApp({ port: 0, token: 'test-only-secret', stateDir: dir });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
@@ -18,9 +18,25 @@ test('loopback API enforces auth, host and origin; validates before mutations an
   try {
     assert.equal((await fetch(base + '/api/jobs')).status, 401);
     assert.equal(
-      (await request('/api/jobs', { headers: { Origin: 'https://attacker.example' } })).status,
-      403,
+      (await request('/api/jobs', { headers: { Origin: 'uxp://com.taejinuos.editoflegends' } }))
+        .status,
+      200,
     );
+    const preflight = await fetch(base + '/api/jobs', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'null',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'authorization',
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+    assert.match(preflight.headers.get('access-control-allow-headers'), /Authorization/i);
+    assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
+    const uxpRequest = await request('/api/jobs', { headers: { Origin: 'null' } });
+    assert.equal(uxpRequest.status, 200);
+    assert.equal(uxpRequest.headers.get('access-control-allow-origin'), '*');
     const badHost = await new Promise((resolve, reject) => {
       const r = http.get(base + '/api/jobs', { headers: { Host: 'attacker.example' } }, (res) => {
         res.resume();

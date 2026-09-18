@@ -128,14 +128,29 @@ export async function createApp({
     try {
       const boundPort = server.address()?.port ?? port;
       const host = `127.0.0.1:${boundPort}`;
+      if (req.url?.split('?')[0] === '/api/health')
+        console.log(
+          `[health] ${req.method} host=${req.headers.host ?? '-'} origin=${req.headers.origin ?? '-'}`,
+        );
       if (req.headers.host !== host && req.headers.host !== `localhost:${boundPort}`)
         return json(res, { error: '허용되지 않은 호스트' }, 403);
-      const origin = req.headers.origin;
-      if (origin && ![`http://${host}`, `http://localhost:${boundPort}`].includes(origin))
-        return json(res, { error: '허용되지 않은 출처' }, 403);
+      // Premiere UXP may use a host-specific origin instead of a browser-style
+      // http origin. The server is loopback-only and every API route still
+      // requires the random bearer token from connection.json.
+      res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'no-referrer');
       const url = new URL(req.url, `http://${host}`);
+      if (req.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+        res.writeHead(204, {
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+          'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+          'Access-Control-Allow-Private-Network': 'true',
+          'Access-Control-Max-Age': '600',
+        });
+        res.end();
+        return;
+      }
       if (!url.pathname.startsWith('/api/')) {
         const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css' };
         const name = files[url.pathname];
@@ -348,12 +363,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
   app.server.listen(port, '127.0.0.1', async () => {
     await atomicJson(path.join(STORE, 'connection.json'), {
-      url: `http://127.0.0.1:${port}`,
+      url: `http://localhost:${port}`,
       token: app.token,
       version: VERSION,
     });
     console.log(
-      `EditOfLegends ${VERSION}\n검토 화면: http://127.0.0.1:${port}/#${app.token}\nPremiere 연결 파일: ${path.join(STORE, 'connection.json')}\n종료: Ctrl+C`,
+      `EditOfLegends ${VERSION}\n검토 화면: http://localhost:${port}/#${app.token}\nPremiere 연결 파일: ${path.join(STORE, 'connection.json')}\n종료: Ctrl+C`,
     );
   });
   process.on('SIGINT', async () => {
