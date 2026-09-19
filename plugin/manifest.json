@@ -2,13 +2,13 @@
   "manifestVersion": 5,
   "id": "com.taejinuos.editoflegends",
   "name": "EditOfLegends",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "main": "index.html",
   "host": { "app": "premierepro", "minVersion": "26.3.0" },
   "requiredPermissions": {
     "localFileSystem": "request",
     "network": { "domains": ["http://localhost", "http://localhost:4317"] },
-    "launchProcess": { "schemes": ["http"] }
+    "launchProcess": { "schemes": ["http", "editoflegends"] }
   },
   "entrypoints": [
     {

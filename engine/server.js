@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile, readdir, stat, rename } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -18,7 +19,9 @@ import {
 } from './core.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const STORE = path.join(ROOT, '.eol');
+const STORE = process.env.EOL_DATA_DIR
+  ? path.resolve(process.env.EOL_DATA_DIR)
+  : path.join(ROOT, '.eol');
 export async function atomicJson(file, value) {
   const tmp = `${file}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2));
@@ -134,10 +137,27 @@ export async function createApp({
         );
       if (req.headers.host !== host && req.headers.host !== `localhost:${boundPort}`)
         return json(res, { error: '허용되지 않은 호스트' }, 403);
+      const origin = req.headers.origin;
+      let allowedOrigin = !origin || origin === 'null' || !/^https?:/i.test(origin);
+      if (origin && /^https?:/i.test(origin)) {
+        try {
+          const parsedOrigin = new URL(origin);
+          allowedOrigin =
+            ['127.0.0.1', 'localhost'].includes(parsedOrigin.hostname) &&
+            Number(parsedOrigin.port || (parsedOrigin.protocol === 'https:' ? 443 : 80)) ===
+              boundPort;
+        } catch {
+          allowedOrigin = false;
+        }
+      }
+      if (!allowedOrigin) return json(res, { error: '허용되지 않은 출처' }, 403);
       // Premiere UXP may use a host-specific origin instead of a browser-style
       // http origin. The server is loopback-only and every API route still
       // requires the random bearer token from connection.json.
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'no-referrer');
       const url = new URL(req.url, `http://${host}`);
@@ -151,25 +171,7 @@ export async function createApp({
         res.end();
         return;
       }
-      if (!url.pathname.startsWith('/api/')) {
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css' };
-        const name = files[url.pathname];
-        if (!name) return json(res, { error: 'Not found' }, 404);
-        res.setHeader(
-          'Content-Security-Policy',
-          "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
-        );
-        res.setHeader(
-          'Content-Type',
-          name.endsWith('.js')
-            ? 'text/javascript'
-            : name.endsWith('.css')
-              ? 'text/css'
-              : 'text/html; charset=utf-8',
-        );
-        res.end(await readFile(path.join(ROOT, 'web', name)));
-        return;
-      }
+      if (!url.pathname.startsWith('/api/')) return json(res, { error: 'Not found' }, 404);
       const provided =
         req.headers.authorization?.replace(/^Bearer /, '') ||
         (url.pathname.startsWith('/api/media/') ? url.searchParams.get('access') : null);
@@ -355,8 +357,17 @@ export async function createApp({
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const port = 4317,
-    app = await createApp({ port });
+  const port = Number(process.env.EOL_PORT || 4317);
+  const configuredToken = process.env.EOL_AUTH_TOKEN;
+  if (configuredToken && !/^[a-f0-9]{64,128}$/i.test(configuredToken)) {
+    console.error('EOL_AUTH_TOKEN must be a 64-128 character hexadecimal value.');
+    process.exit(2);
+  }
+  const app = await createApp({
+    port,
+    token: configuredToken || randomBytes(24).toString('hex'),
+    stateDir: STORE,
+  });
   app.server.on('error', (e) => {
     console.error(`엔진 시작 실패: ${e.message}`);
     process.exitCode = 1;
@@ -368,7 +379,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       version: VERSION,
     });
     console.log(
-      `EditOfLegends ${VERSION}\n검토 화면: http://localhost:${port}/#${app.token}\nPremiere 연결 파일: ${path.join(STORE, 'connection.json')}\n종료: Ctrl+C`,
+      `EditOfLegends ${VERSION} (${os.platform()})\n검토 화면: http://localhost:${port}/#${app.token}\nPremiere 연결 파일: ${path.join(STORE, 'connection.json')}\n종료: Ctrl+C`,
     );
   });
   process.on('SIGINT', async () => {

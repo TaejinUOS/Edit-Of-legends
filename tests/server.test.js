@@ -31,12 +31,16 @@ test('loopback API enforces auth and host; supports UXP CORS; validates before m
       },
     });
     assert.equal(preflight.status, 204);
-    assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+    assert.equal(preflight.headers.get('access-control-allow-origin'), 'null');
     assert.match(preflight.headers.get('access-control-allow-headers'), /Authorization/i);
     assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
     const uxpRequest = await request('/api/jobs', { headers: { Origin: 'null' } });
     assert.equal(uxpRequest.status, 200);
-    assert.equal(uxpRequest.headers.get('access-control-allow-origin'), '*');
+    assert.equal(uxpRequest.headers.get('access-control-allow-origin'), 'null');
+    assert.equal(
+      (await request('/api/jobs', { headers: { Origin: 'https://attacker.example' } })).status,
+      403,
+    );
     const badHost = await new Promise((resolve, reject) => {
       const r = http.get(base + '/api/jobs', { headers: { Host: 'attacker.example' } }, (res) => {
         res.resume();

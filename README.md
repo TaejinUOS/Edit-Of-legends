@@ -2,11 +2,22 @@
 
 롤 녹화본의 K/D/A를 로컬에서 읽어 하이라이트 컷을 만들고, Premiere Pro의 새 시퀀스에 배치하는 MVP입니다.
 
-**현재 배포 형태는 개발용 MVP입니다.** 로컬 분석·웹 검토 화면은 실제 녹화본으로 테스트합니다. Premiere UXP 어댑터는 구현 및 SDK 모형 테스트를 포함하지만, 실제 Premiere에서 패널 로드·타임라인 생성은 별도 호스트 검증이 필요합니다. 이 저장소가 PRD의 정식 출시 조건을 모두 충족한 것은 아닙니다.
+Windows 배포판은 Premiere UXP 패널과 로컬 분석 엔진 설치 프로그램으로 구성됩니다. 로컬 분석·웹 검토 화면은 실제 녹화본으로 테스트합니다. Premiere UXP 어댑터는 구현 및 SDK 모형 테스트를 포함하지만, 실제 타임라인 생성은 별도 호스트 검증이 필요합니다. 이 저장소가 PRD의 정식 출시 조건을 모두 충족한 것은 아닙니다.
+
+## Windows 설치
+
+배포 파일 두 개를 순서대로 설치합니다.
+
+1. `EditOfLegends-Engine-Setup-0.2.2-win-x64.exe`를 실행해 분석 엔진을 설치합니다.
+2. `com.taejinuos.editoflegends_premierepro.ccx`를 더블클릭해 Creative Cloud Desktop으로 패널을 설치합니다.
+3. Premiere를 다시 시작하고 **Window → UXP Plugins → EditOfLegends**를 엽니다.
+4. 최초 엔진 실행 확인 창에서 허용합니다. 선택을 기억하면 이후 패널이 엔진을 자동으로 시작하고 연결합니다.
+
+배포판에는 Node.js, FFmpeg, ffprobe와 OCR 데이터가 포함되므로 사용자가 별도로 설치하거나 `start.ps1`을 실행할 필요가 없습니다. 영상과 분석 데이터는 로컬에서만 처리되며 `%LOCALAPPDATA%\EditOfLegends`에 저장됩니다.
 
 ## 빠르게 실행
 
-필요 환경: Windows 11, Node.js 22 이상, PATH에 등록된 FFmpeg와 ffprobe. OCR 모델은 npm 패키지에 포함되어 설치 이후 분석할 때 인터넷을 사용하지 않습니다.
+이 절은 소스에서 개발할 때만 사용합니다. 필요 환경은 Windows 11과 Node.js 22 이상입니다. FFmpeg, ffprobe와 OCR 모델은 npm 패키지에 포함되어 설치 이후 분석할 때 인터넷을 사용하지 않습니다.
 
 ```powershell
 npm ci
@@ -15,7 +26,7 @@ npm start
 
 또는 `start.ps1`을 실행합니다. 실행 창에 출력되는 `http://localhost:4317/#...` 주소를 열면 검토 화면이 나타납니다. 터미널을 닫으면 엔진이 종료됩니다. `src-video/` 안의 MP4는 자동으로 선택 목록에 표시되며, 다른 파일은 절대 경로로 불러올 수 있습니다.
 
-주소를 놓쳤다면 `http://localhost:4317/`에서 **엔진 연결 파일**을 눌러 `.eol/connection.json`을 선택하세요. 토큰은 엔진을 다시 시작할 때 바뀝니다. 이 파일과 URL의 토큰을 다른 사람에게 공유하지 마세요.
+개발 실행에서 자동 연결을 사용할 수 없다면 패널의 **기타 설정 → 개발용 연결 파일 선택**에서 `.eol/connection.json`을 선택하세요. 이 파일과 검토 URL의 토큰을 다른 사람에게 공유하지 마세요.
 
 ## 사용 순서
 
@@ -29,7 +40,7 @@ npm start
 
 이벤트 또는 전역 컷 설정을 바꾸면 이전 수동 컷 경계 조정은 초기화됩니다. 웹 검토 화면의 수정은 로컬에 자동 저장됩니다. Premiere 패널에서 다시 작업을 불러오면 최신 전역 설정까지 반영됩니다.
 
-## Premiere 패널 설치
+## Premiere 개발 로드
 
 이 MVP는 서브클립 API를 사용하므로 **Premiere Pro 26.3 이상**을 대상으로 합니다. 개발 PC에서 발견한 버전은 26.5.1입니다. 설치된 버전을 발견한 것과 해당 버전에서 통합 테스트를 통과한 것은 구분합니다.
 
@@ -38,7 +49,7 @@ npm start
 3. UXP Developer Tool에서 기존 플러그인을 추가하고 `plugin/manifest.json`을 선택합니다.
 4. Premiere에 연결된 상태에서 **Load & Watch**를 누릅니다.
 5. Premiere의 **Window → UXP Plugins → EditOfLegends** 패널을 엽니다.
-6. 로컬 엔진을 실행하고 패널에서 `.eol/connection.json`을 선택합니다.
+6. 로컬 엔진을 실행합니다. 배포용 동반 앱이 없다면 개발용 연결 파일을 선택합니다.
 
 개발 모드와 로드 방식의 근거: [Adobe 공식 플러그인 시작 가이드](https://developer.adobe.com/premiere-pro/uxp/plugins/).
 
@@ -52,7 +63,13 @@ npm start
 npm run package:plugin
 ```
 
-이 명령은 `dist/`에 **개발 소스 ZIP**을 만듭니다. 서명된 `.ccx` 설치 파일이 아니며, 더블클릭 설치를 지원하지 않습니다.
+이 명령은 `dist/`에 설치 가능한 `.ccx` 패키지를 만듭니다. 전체 Windows 배포본은 다음 명령으로 생성합니다.
+
+```powershell
+npm run package:release
+```
+
+출력은 UXP `.ccx`와 `EditOfLegends-Engine-Setup-<version>-win-x64.exe`입니다. Windows 설치 프로그램 생성에는 Inno Setup 6이 필요합니다. 공개 배포 전에는 설치 프로그램 코드 서명과 실제 Premiere 호스트 검증을 별도로 완료해야 합니다.
 
 ## 지원 범위
 
@@ -93,9 +110,9 @@ npm run analyze -- "src-video/예시녹화본1.mp4" 630 650
 
 ```text
 engine/    로컬 HTTP API, FFmpeg 입출력, OCR, 이벤트 판정과 컷 계획
-web/       로컬 영상 미리보기 및 장면 검토 UI
 plugin/    Premiere UXP 패널과 직접 시퀀스 생성 어댑터
-scripts/   실행 점검, CLI 분석, 개발 플러그인 소스 패키징
+companion/ Windows 동반 앱 런처와 Inno Setup 설치 정의
+scripts/   실행 점검, CLI 분석, UXP 및 Windows 배포 패키징
 tests/     핵심 로직·HTTP·호스트 어댑터·실제 HUD 회귀 테스트
 .eol/      로컬 작업, 모델 분석 캐시, 연결 토큰 (Git 제외)
 src-video/ 사용자 녹화본 (Git 제외)
@@ -105,9 +122,9 @@ src-video/ 사용자 녹화본 (Git 제외)
 
 ## 문제 해결
 
-- **연결 실패:** 엔진 실행 여부를 확인하고 최신 `connection.json`을 다시 선택합니다.
+- **자동 실행 실패:** Windows 동반 앱 설치 여부와 `editoflegends://` 프로토콜 등록을 확인합니다. 개발 환경에서는 `connection.json`을 선택할 수 있습니다.
 - **포트 사용 중:** 이미 실행한 EditOfLegends 엔진이 있는지 확인합니다. 여러 엔진을 중복 실행하지 마세요.
-- **FFmpeg 없음:** FFmpeg와 ffprobe를 PATH에 추가하거나 `FFMPEG_PATH`, `FFPROBE_PATH` 환경변수에 실행 파일 경로를 지정합니다.
+- **FFmpeg 없음:** 배포판은 엔진 설치 프로그램을 다시 설치합니다. 개발 환경은 `npm ci`를 다시 실행하거나 `FFMPEG_PATH`, `FFPROBE_PATH`를 지정합니다.
 - **판독 불가:** 게임 화면이 보이는 시점에서 세 숫자와 `/`만 들어오도록 HUD 영역을 조절합니다. 로비·로딩 화면에서 0개 판독은 정상입니다.
 - **생성 실패:** 오류 메시지와 `_INCOMPLETE` 시퀀스를 확인합니다. 원본 파일의 오프라인 상태, 프레임레이트 및 채널 매핑을 확인한 후 새로 생성합니다.
 - **분석 취소/종료:** 진행 중인 분석의 부분 재개는 지원하지 않습니다. 완료된 분석 캐시만 재사용합니다.

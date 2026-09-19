@@ -1,9 +1,17 @@
 import { spawn } from 'node:child_process';
 import { stat, realpath } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { number, roiPixels } from './core.js';
 
-export const bin = (name) => process.env[name.toUpperCase() + '_PATH'] || name;
+const require = createRequire(import.meta.url);
+const bundledBins = {
+  ffmpeg: require('ffmpeg-static'),
+  ffprobe: require('ffprobe-static').path,
+};
+
+export const bin = (name) =>
+  process.env[name.toUpperCase() + '_PATH'] || bundledBins[name] || name;
 export function run(command, args, { signal, maxBytes = 24 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(command, args, { windowsHide: true, signal });

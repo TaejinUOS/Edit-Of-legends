@@ -3,6 +3,10 @@ const { entrypoints, shell, storage } = require('uxp');
 const host = require('./premiere.js').adapter(ppro);
 const $ = (id) => document.getElementById(id);
 const CONNECTION_FILE_KEY = 'editoflegends.connection-file-token';
+const ENGINE_TOKEN_KEY = 'editoflegends.engine-token';
+const ENGINE_URL = 'http://localhost:4317';
+const ENGINE_VERSION = '0.2.2';
+const ENGINE_START_URL = 'editoflegends://start';
 
 let connection = null;
 let source = null;
@@ -52,6 +56,7 @@ function updateControls() {
   const analyzing = isAnalyzing();
   const busy = analyzing || generating;
   $('connect').disabled = busy;
+  $('connection-file').disabled = busy;
   $('source').disabled = !connected || busy;
   $('review').disabled = !connected;
   $('analyze').disabled = !connected || !source || busy;
@@ -116,7 +121,7 @@ async function request(activeConnection, route, method = 'GET', data) {
 }
 
 async function api(route, method = 'GET', data) {
-  if (!connection) throw Error('엔진 연결 파일을 먼저 선택하세요.');
+  if (!connection) throw Error('분석 엔진을 먼저 연결하세요.');
   try {
     return await request(connection, route, method, data);
   } catch (error) {
@@ -131,7 +136,7 @@ async function api(route, method = 'GET', data) {
 
 function validateConnection(candidate) {
   if (
-    candidate?.url !== 'http://localhost:4317' ||
+    candidate?.url !== ENGINE_URL ||
     typeof candidate.token !== 'string' ||
     !candidate.token
   )
@@ -150,8 +155,65 @@ async function readConnectionFile(file) {
 
 async function verifyConnection(candidate) {
   const health = await request(candidate, 'health');
-  if (health.version !== '0.1.0') throw Error('패널과 엔진 버전이 다릅니다.');
+  if (health.version !== ENGINE_VERSION) throw Error('패널과 엔진 버전이 다릅니다.');
   if (!health.ffmpeg || !health.ffprobe) throw Error('FFmpeg/ffprobe를 찾을 수 없습니다.');
+}
+
+function companionConnection() {
+  let token = localStorage.getItem(ENGINE_TOKEN_KEY);
+  if (!/^[a-f0-9]{64}$/i.test(token || '')) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    token = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem(ENGINE_TOKEN_KEY, token);
+  }
+  return { url: ENGINE_URL, token };
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function startCompanion(candidate) {
+  setHealth('엔진 시작 중', 'offline');
+  showMessage('EditOfLegends 분석 엔진을 시작하고 있습니다.');
+  const result = await shell.openExternal(
+    ENGINE_START_URL + '?token=' + encodeURIComponent(candidate.token),
+    'EditOfLegends가 로컬 분석 엔진을 시작합니다. 영상은 이 컴퓨터 안에서만 처리됩니다.',
+  );
+  if (result) throw Error('분석 엔진을 시작하지 못했습니다. ' + result);
+  let lastError;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await wait(500);
+    try {
+      await verifyConnection(candidate);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (error.status === 401)
+        throw Error('다른 인증 정보로 실행 중인 엔진이 있습니다. 기존 엔진을 종료한 뒤 다시 시도하세요.');
+    }
+  }
+  throw Error(`분석 엔진이 준비되지 않았습니다. ${lastError?.message || ''}`.trim());
+}
+
+async function connectCompanion({ automatic = false } = {}) {
+  const candidate = companionConnection();
+  setHealth('연결 확인 중', 'offline');
+  try {
+    await verifyConnection(candidate);
+  } catch (error) {
+    if (error.status === 401) throw error;
+    await startCompanion(candidate);
+  }
+  connection = candidate;
+  setHealth('엔진 연결됨', 'online');
+  await refreshJobs();
+  showMessage(
+    automatic
+      ? '로컬 분석 엔진을 자동으로 시작하고 연결했습니다.'
+      : '로컬 분석 엔진에 연결했습니다.',
+  );
 }
 
 async function rememberedConnectionFile() {
@@ -171,7 +233,6 @@ async function connectFile(file, { remember = false, automatic = false } = {}) {
   await verifyConnection(candidate);
   connection = candidate;
   setHealth('엔진 연결됨', 'online');
-  $('connect').textContent = '연결 파일 다시 선택';
   if (remember) {
     const token = await storage.localFileSystem.createPersistentToken(file);
     localStorage.setItem(CONNECTION_FILE_KEY, token);
@@ -187,19 +248,22 @@ async function connectFile(file, { remember = false, automatic = false } = {}) {
 async function autoConnect() {
   if (autoConnectStarted || connection) return;
   autoConnectStarted = true;
-  const file = await rememberedConnectionFile();
-  if (!file) return;
   try {
-    await connectFile(file, { automatic: true });
+    await connectCompanion({ automatic: true });
   } catch (error) {
+    const file = await rememberedConnectionFile();
+    if (file) {
+      try {
+        await connectFile(file, { automatic: true });
+        return;
+      } catch {
+        /* Fall through to the companion error and show the developer fallback. */
+      }
+    }
     connection = null;
     setAdvancedSettings(true);
     setHealth('자동 연결 실패', 'error');
-    $('connect').textContent = '엔진 다시 연결';
-    showMessage(
-      `${error.message}\n엔진을 실행한 뒤 연결 파일을 다시 선택하면 자동 연결이 갱신됩니다.`,
-      true,
-    );
+    showMessage(`${error.message}\n동반 앱을 설치하거나 개발용 연결 파일을 선택하세요.`, true);
   } finally {
     updateControls();
   }
@@ -348,13 +412,11 @@ async function pollJob() {
 }
 
 $('connect').onclick = safe(async () => {
-  if (!connection) {
-    const remembered = await rememberedConnectionFile();
-    if (remembered) {
-      await connectFile(remembered, { automatic: true });
-      return;
-    }
-  }
+  connection = null;
+  await connectCompanion();
+});
+
+$('connection-file').onclick = safe(async () => {
   const file = await storage.localFileSystem.getFileForOpening({ types: ['json'] });
   if (!file) return;
   await connectFile(file, { remember: true });

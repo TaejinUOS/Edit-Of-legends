@@ -209,12 +209,9 @@ input:disabled {
 .source-info.empty { color: var(--muted); }
 
 .field-grid {
-  display: grid;
+  display: flex;
   gap: 6px;
 }
-
-.field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.field-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
 .field-grid label,
 .worker-row label {
@@ -223,6 +220,8 @@ input:disabled {
   font-size: 9px;
   font-weight: 600;
 }
+
+.field-grid label { flex: 1 1 0; }
 
 small {
   color: var(--muted);
@@ -247,29 +246,39 @@ select {
 input:focus,
 select:focus { border-color: #7e8e37; }
 
-.timing-grid { margin-bottom: 7px; }
-
-.event-types {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+.setting-fieldset {
+  position: relative;
   min-width: 0;
-  margin: 0 0 8px;
-  padding: 5px 7px;
+  margin: 4px 0 8px;
+  padding: 10px 8px 8px;
   border: 1px solid #34343a;
   border-radius: 3px;
 }
 
-.event-types legend {
-  padding: 0 3px;
+.setting-legend {
+  position: absolute;
+  top: -5px;
+  left: 6px;
+  padding: 0 4px;
+  background: var(--surface);
   color: var(--muted);
   font-size: 8px;
+  line-height: 10px;
+}
+
+.timing-grid { margin-bottom: 0; }
+
+.event-type-grid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .event-types label {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 0;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   white-space: nowrap;
 }
 
@@ -346,8 +355,7 @@ select:focus { border-color: #7e8e37; }
 }
 
 .event {
-  display: grid;
-  grid-template-columns: 40px 1fr auto;
+  display: flex;
   gap: 6px;
   align-items: center;
   padding: 5px 3px;
@@ -356,6 +364,14 @@ select:focus { border-color: #7e8e37; }
 }
 
 .event:first-child { border-top: 0; }
+.event input {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+.event-copy { flex: 1 1 auto; }
+.event small { flex: 0 0 auto; }
 .event time { color: var(--muted); }
 
 .message {
@@ -434,6 +450,6 @@ select:focus { border-color: #7e8e37; }
 @media (max-width: 330px) {
   .panel { padding: 7px; }
   .title-block p { display: none; }
-  .event-types { gap: 5px; }
+  .event-type-grid { gap: 8px; }
   .event-types label { font-size: 9px; }
 }

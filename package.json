@@ -1,6 +1,6 @@
 {
   "name": "edit-of-legends",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Local League of Legends KDA analysis and Premiere Pro rough-cut panel",
@@ -12,10 +12,14 @@
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check.js",
     "analyze": "node scripts/analyze.js",
-    "package:plugin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-plugin.ps1"
+    "package:plugin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-plugin.ps1",
+    "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "package:release": "npm run check && npm test && npm run package:windows"
   },
   "dependencies": {
     "@tesseract.js-data/eng": "1.0.0",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
     "sharp": "^0.35.4",
     "tesseract.js": "^7.0.0"
   },

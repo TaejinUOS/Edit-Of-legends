@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.2';
 export const TYPES = ['kill', 'death', 'assist'];
 export const TRACKS = { kill: 0, assist: 1, death: 2 };
 export const DEFAULT_ROI = { x: 0.867, y: 0.001, width: 0.039, height: 0.022 };

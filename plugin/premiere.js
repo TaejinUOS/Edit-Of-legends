@@ -110,7 +110,7 @@ function adapter(ppro) {
       null
     );
   }
-  async function cleanupArtifacts(projectGuid, prefix, sequenceGuid, previousSequenceGuid) {
+  async function cleanupArtifacts(projectGuid, artifactNames, sequenceGuid, previousSequenceGuid) {
     const failures = [];
     let project = ppro.Project.getProject(projectGuid);
     if (sequenceGuid) {
@@ -136,9 +136,7 @@ function adapter(ppro) {
     try {
       project = ppro.Project.getProject(projectGuid);
       const root = await project.getRootItem();
-      const leftovers = (await descendants(root)).filter(
-        (item) => item.name?.startsWith(prefix + '_') && item.name !== prefix + '_INCOMPLETE',
-      );
+      const leftovers = (await descendants(root)).filter((item) => artifactNames.includes(item.name));
       if (leftovers.length) {
         const entries = leftovers.map((item) => ({ item, parent: item.getParentBin() }));
         transaction(project, 'EditOfLegends: 실패 항목 정리', () =>
@@ -166,8 +164,12 @@ function adapter(ppro) {
         ppro.FrameRate.createWithValue(plan.fpsNum / plan.fpsDen),
       );
     const uid = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
-    const prefix = 'EOL_' + uid,
-      names = plan.clips.map((c, i) => `${prefix}_${String(i + 1).padStart(3, '0')}_${c.type}`);
+    const prefix = 'EOL_' + uid;
+    const eventLabels = { kill: '킬', assist: '어시', death: '데스' };
+    const names = plan.clips.map(
+      (clip, index) =>
+        `EOL_${index + 1}번클립(${eventLabels[clip.type] ?? clip.type})_${uid}`,
+    );
     let sequenceGuid = null,
       stage = '서브클립 생성';
     try {
@@ -355,11 +357,11 @@ function adapter(ppro) {
       if (audioTracks < plan.source.audio.length)
         throw Error('일부 오디오 트랙이 누락되었습니다. 원본 오디오 채널 매핑을 확인하세요.');
       stage = '이름 지정';
-      const name = 'EOL_' + plan.source.name.replace(/\.[^.]+$/, '') + '_' + uid;
+      const name = 'EOL_하이라이트_' + plan.source.name.replace(/\.[^.]+$/, '') + '_' + uid;
       const sequenceItem = await sequence.getProjectItem();
       transaction(project, 'EditOfLegends: 생성 완료', () => [
         ...tracksToRename.map(({ track, index }) =>
-          track.createSetNameAction(['EOL · Kill', 'EOL · Assist', 'EOL · Death'][index]),
+          track.createSetNameAction(['EOL · 킬', 'EOL · 어시', 'EOL · 데스'][index]),
         ),
         sequenceItem.createSetNameAction(name),
       ]);
@@ -371,7 +373,7 @@ function adapter(ppro) {
     } catch (e) {
       const cleanupFailures = await cleanupArtifacts(
         projectGuid,
-        prefix,
+        names,
         sequenceGuid,
         previousSequenceGuid,
       );

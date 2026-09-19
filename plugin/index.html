@@ -32,17 +32,22 @@
         <div class="section-title">
           <h2 id="analysis-title"><span>02</span> 분석</h2>
         </div>
-        <div class="field-grid three timing-grid">
-          <label>이전 <small>초</small><input id="before" type="number" value="11" min="0" max="120" /></label>
-          <label>이후 <small>초</small><input id="after" type="number" value="7" min="0" max="120" /></label>
-          <label>동시 판정 <small>초</small><input id="gap" type="number" value="15" min="0" max="60" /></label>
+        <div class="setting-fieldset clip-timing" role="group" aria-labelledby="clip-timing-title">
+          <div id="clip-timing-title" class="setting-legend">클립 시간 설정</div>
+          <div class="field-grid three timing-grid">
+            <label>사건 이전 <small>초</small><input id="before" type="number" value="11" min="0" max="120" /></label>
+            <label>사건 이후 <small>초</small><input id="after" type="number" value="7" min="0" max="120" /></label>
+            <label>겹치는 사건 <small>초</small><input id="gap" type="number" value="15" min="0" max="60" /></label>
+          </div>
         </div>
-        <fieldset class="event-types">
-          <legend>포함할 이벤트</legend>
-          <label><input id="kill" type="checkbox" checked /><span class="track v1">V1</span> 킬</label>
-          <label><input id="assist" type="checkbox" checked /><span class="track v2">V2</span> 어시</label>
-          <label><input id="death" type="checkbox" checked /><span class="track v3">V3</span> 데스</label>
-        </fieldset>
+        <div class="setting-fieldset event-types" role="group" aria-labelledby="event-types-title">
+          <div id="event-types-title" class="setting-legend">포함할 이벤트</div>
+          <div class="event-type-grid">
+            <label><input id="kill" type="checkbox" checked /><span class="track v1">V1</span> 킬</label>
+            <label><input id="death" type="checkbox" checked /><span class="track v3">V3</span> 데스</label>
+            <label><input id="assist" type="checkbox" checked /><span class="track v2">V2</span> 어시</label>
+          </div>
+        </div>
         <div class="action-row">
           <button id="analyze" class="primary grow">녹화본 분석</button>
           <button id="cancel" class="secondary cancel-button">취소</button>
@@ -84,7 +89,8 @@
             <div class="setting-heading">
               <strong>로컬 엔진</strong><span class="hint-inline">자동 연결</span>
             </div>
-            <button id="connect" class="secondary full">연결 파일 선택</button>
+            <button id="connect" class="secondary full">엔진 시작 및 다시 연결</button>
+            <button id="connection-file" class="text-button full">개발용 연결 파일 선택</button>
           </div>
           <div class="setting-block worker-row">
             <label for="workers">분석 워커</label>

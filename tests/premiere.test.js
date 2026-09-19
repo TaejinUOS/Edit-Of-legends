@@ -225,6 +225,9 @@ test('host creates a NEW validated timeline with correct tracks and synced audio
   assert.equal(f.created.video[1].items.length, 1);
   assert.equal(f.created.video[2].items.length, 1);
   assert.equal(f.items[0].name, 'game.mp4');
+  assert.match(f.items[1].name, /^EOL_1번클립\(킬\)_[a-z0-9_]+$/);
+  assert.match(f.items[2].name, /^EOL_2번클립\(데스\)_[a-z0-9_]+$/);
+  assert.match(f.items[3].name, /^EOL_3번클립\(어시\)_[a-z0-9_]+$/);
   assert.ok(!f.created.name.includes('INCOMPLETE'));
 });
 test('host failures remove the incomplete sequence and generated subclips', async () => {
