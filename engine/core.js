@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
 export const VERSION = '0.2.2';
+// Bump only when OCR, sampling, event detection, or cached result compatibility changes.
+// App releases and performance-only changes must not invalidate analysis results.
+export const ANALYSIS_REVISION = 2;
 export const TYPES = ['kill', 'death', 'assist'];
 export const TRACKS = { kill: 0, assist: 1, death: 2 };
 export const DEFAULT_ROI = { x: 0.867, y: 0.001, width: 0.039, height: 0.022 };
@@ -213,8 +216,7 @@ export function cacheKey(source, roi, interval) {
   return createHash('sha256')
     .update(
       JSON.stringify({
-        version: VERSION,
-        analysisRevision: 2,
+        analysisRevision: ANALYSIS_REVISION,
         path: source.path,
         size: source.size,
         modified: source.modified,

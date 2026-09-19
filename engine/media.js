@@ -10,8 +10,7 @@ const bundledBins = {
   ffprobe: require('ffprobe-static').path,
 };
 
-export const bin = (name) =>
-  process.env[name.toUpperCase() + '_PATH'] || bundledBins[name] || name;
+export const bin = (name) => process.env[name.toUpperCase() + '_PATH'] || bundledBins[name] || name;
 export function run(command, args, { signal, maxBytes = 24 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(command, args, { windowsHide: true, signal });
@@ -165,7 +164,8 @@ export async function frame(source, time, roi = null) {
   ]);
 }
 
-export async function* sampleFrames(source, roi, interval, signal) {
+export async function* sampleFrames(source, roi, interval, signal, threads = 4) {
+  threads = Math.floor(number(threads, 'FFmpeg threads', 1, 8));
   const r = roiPixels(roi, source.width, source.height),
     bytes = r.width * r.height;
   const p = spawn(
@@ -175,7 +175,7 @@ export async function* sampleFrames(source, roi, interval, signal) {
       '-loglevel',
       'error',
       '-threads',
-      '2',
+      String(threads),
       '-ss',
       String(source.in),
       '-i',
@@ -183,12 +183,16 @@ export async function* sampleFrames(source, roi, interval, signal) {
       '-t',
       String(source.out - source.in),
       '-an',
+      '-filter_threads',
+      '1',
       '-vf',
       `fps=${1 / interval}:start_time=0:round=up,crop=${r.width}:${r.height}:${r.x}:${r.y},format=gray`,
       '-f',
       'rawvideo',
       '-pix_fmt',
       'gray',
+      '-threads',
+      '1',
       'pipe:1',
     ],
     { windowsHide: true, signal },

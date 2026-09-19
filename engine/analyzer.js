@@ -6,10 +6,17 @@ import { createWorker, createScheduler, PSM } from 'tesseract.js';
 import { parseKda, detectEvents, number, roiPixels } from './core.js';
 import { sampleFrames, verifyCfr } from './media.js';
 import { glyphImages } from './ocr-image.js';
+import { threadCandidates, fastestThreads, memoizeOcr } from './performance.js';
 
 const require = createRequire(import.meta.url);
 const language = require('@tesseract.js-data/eng');
 const glyphCaches = new WeakMap();
+const hudCaches = new WeakMap();
+
+function resetCaches(pool) {
+  glyphCaches.set(pool, new Map());
+  hudCaches.set(pool, new Map());
+}
 
 export async function ocrPool(count = 1) {
   const scheduler = createScheduler();
@@ -28,7 +35,7 @@ export async function ocrPool(count = 1) {
         user_defined_dpi: '70',
       });
     }
-    glyphCaches.set(scheduler, new Map());
+    resetCaches(scheduler);
     return scheduler;
   } catch (e) {
     await scheduler.terminate();
@@ -37,6 +44,15 @@ export async function ocrPool(count = 1) {
 }
 
 export async function readKda(pool, input, rawInfo) {
+  if (!hudCaches.has(pool)) resetCaches(pool);
+  const key = createHash('sha256')
+    .update(rawInfo ? `raw:${rawInfo.width}:${rawInfo.height}:` : 'encoded:')
+    .update(input)
+    .digest('hex');
+  return memoizeOcr(hudCaches.get(pool), key, () => recognizeKda(pool, input, rawInfo));
+}
+
+async function recognizeKda(pool, input, rawInfo) {
   const lineImage = sharp(
     input,
     rawInfo ? { raw: { width: rawInfo.width, height: rawInfo.height, channels: 1 } } : undefined,
@@ -61,14 +77,7 @@ export async function readKda(pool, input, rawInfo) {
   const chars = await Promise.all(
     images.map((png) => {
       const key = createHash('sha256').update(png).digest('hex');
-      if (!cache.has(key)) {
-        if (cache.size >= 2048) cache.delete(cache.keys().next().value);
-        cache.set(
-          key,
-          pool.addJob('recognize', png).then((r) => r.data),
-        );
-      }
-      return cache.get(key);
+      return memoizeOcr(cache, key, () => pool.addJob('recognize', png).then((r) => r.data));
     }),
   );
   const text = chars.map((c) => c.text.trim()).join('');
@@ -92,11 +101,68 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
   await verifyCfr(source, signal);
   onProgress({ stage: 'OCR 준비', progress: 0, workers });
   const pool = await ocrPool(workers);
+  const candidates = threadCandidates(available, workers);
+  const threadTrials = [];
+  let decoderThreads = candidates[0];
   const samples = [],
     batch = [];
   try {
+    if (candidates.length > 1) {
+      const preview = { ...source, out: Math.min(source.out, source.in + 8) };
+      // Warm up WASM before timing; each trial starts with equally empty caches.
+      for await (const f of sampleFrames(
+        { ...preview, out: Math.min(preview.out, preview.in + interval) },
+        options.roi,
+        interval,
+        signal,
+        decoderThreads,
+      ))
+        await readKda(pool, f.raw, f);
+      for (const threads of [...candidates, ...candidates.toReversed()]) {
+        signal?.throwIfAborted();
+        resetCaches(pool);
+        onProgress({
+          stage: `디코딩·OCR 비교 (${threads}스레드)`,
+          progress: 0,
+          workers,
+          decoderThreads: threads,
+        });
+        const started = performance.now();
+        const pending = [];
+        let frames = 0;
+        try {
+          for await (const f of sampleFrames(preview, options.roi, interval, signal, threads)) {
+            // Attach rejection handlers immediately while decoding continues.
+            pending.push(
+              readKda(pool, f.raw, f).then(
+                () => null,
+                (error) => error,
+              ),
+            );
+            frames++;
+            if (pending.length >= workers * 2) {
+              const errors = await Promise.all(pending);
+              pending.length = 0;
+              const error = errors.find(Boolean);
+              if (error) throw error;
+            }
+          }
+          const errors = await Promise.all(pending);
+          const error = errors.find(Boolean);
+          if (error) throw error;
+        } finally {
+          await Promise.allSettled(pending);
+        }
+        threadTrials.push({ threads, elapsedMs: performance.now() - started, frames });
+      }
+      decoderThreads = fastestThreads(threadTrials);
+      resetCaches(pool);
+    }
     const flush = async () => {
-      const values = await Promise.all(batch.splice(0));
+      const completed = await Promise.allSettled(batch.splice(0));
+      const failed = completed.find((entry) => entry.status === 'rejected');
+      if (failed) throw failed.reason;
+      const values = completed.map((entry) => entry.value);
       samples.push(...values);
       const t = samples.at(-1)?.time ?? source.in;
       onProgress({
@@ -104,20 +170,23 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
         progress: Math.min(0.99, (t - source.in) / (source.out - source.in)),
         samples: samples.length,
         workers,
+        decoderThreads,
       });
     };
-    for await (const f of sampleFrames(source, options.roi, interval, signal)) {
-      batch.push(readKda(pool, f.raw, f).then((value) => ({ time: f.time, ...value })));
+    for await (const f of sampleFrames(source, options.roi, interval, signal, decoderThreads)) {
+      const pending = readKda(pool, f.raw, f).then((value) => ({ time: f.time, ...value }));
+      pending.catch(() => {});
+      batch.push(pending);
       if (batch.length >= workers * 2) await flush();
     }
     if (batch.length) await flush();
-    if (signal.aborted) throw new Error('분석을 취소했습니다.');
+    if (signal?.aborted) throw new Error('분석을 취소했습니다.');
     const result = detectEvents(samples, interval);
     if (!result.finalKda)
       throw new Error(
         'K/D/A를 읽지 못했습니다. 숫자 세 개와 / 구분자만 포함하도록 HUD 영역을 조정하세요.',
       );
-    return { ...result, samples, workers, interval };
+    return { ...result, samples, workers, interval, decoderThreads, threadTrials };
   } finally {
     await Promise.allSettled(batch);
     await pool.terminate();

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   detectEvents,
   parseKda,
@@ -8,6 +9,7 @@ import {
   roiPixels,
   cacheKey,
   DEFAULT_ROI,
+  ANALYSIS_REVISION,
 } from '../engine/core.js';
 const source = { in: 0, out: 200, duration: 200, fpsNum: 60, fpsDen: 1 };
 const e = (type, time, id = type + time) => ({ type, time, id, amount: 1, included: true });
@@ -169,7 +171,29 @@ test('analysis cache changes with source or ROI, not clip planning', () => {
   const a = cacheKey(s, DEFAULT_ROI, 0.5);
   assert.notEqual(a, cacheKey({ ...s, modified: 2 }, DEFAULT_ROI, 0.5));
   assert.notEqual(a, cacheKey(s, { ...DEFAULT_ROI, x: 0.8 }, 0.5));
+  assert.notEqual(a, cacheKey(s, DEFAULT_ROI, 1));
+  assert.notEqual(a, cacheKey({ ...s, out: 100 }, DEFAULT_ROI, 0.5));
   assert.equal(a, cacheKey({ ...s, before: 99 }, DEFAULT_ROI, 0.5));
+});
+
+test('app releases preserve cache keys; analysis revisions invalidate them', async () => {
+  const code = await readFile(new URL('../engine/core.js', import.meta.url), 'utf8');
+  const load = (text) =>
+    import(`data:text/javascript;base64,${Buffer.from(text).toString('base64')}`);
+  const released = await load(
+    code.replace(/export const VERSION = '[^']+';/, "export const VERSION = '999.0.0';"),
+  );
+  const revised = await load(
+    code.replace(
+      `export const ANALYSIS_REVISION = ${ANALYSIS_REVISION};`,
+      `export const ANALYSIS_REVISION = ${ANALYSIS_REVISION + 1};`,
+    ),
+  );
+  const s = { ...source, path: 'x', size: 1, modified: 1 };
+  assert.equal(released.VERSION, '999.0.0');
+  assert.equal(revised.ANALYSIS_REVISION, ANALYSIS_REVISION + 1);
+  assert.equal(cacheKey(s, DEFAULT_ROI, 0.5), released.cacheKey(s, DEFAULT_ROI, 0.5));
+  assert.notEqual(cacheKey(s, DEFAULT_ROI, 0.5), revised.cacheKey(s, DEFAULT_ROI, 0.5));
 });
 test('manual clip trim recalculates downstream output positions and rejects overlaps', () => {
   const p = planClips([e('kill', 30), e('death', 80)], source);
