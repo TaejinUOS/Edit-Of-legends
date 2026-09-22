@@ -197,8 +197,9 @@ function plan() {
     path: 'C:/game.mp4',
     name: 'game.mp4',
     in: 0,
-    out: 200,
-    duration: 200,
+    out: 400,
+    duration: 400,
+    openingWindow: { in: 50, out: 210 },
     fpsNum: 60,
     fpsDen: 1,
     audio: [{ channels: 2 }],
@@ -206,9 +207,9 @@ function plan() {
   return {
     ...planClips(
       [
-        { id: '1', type: 'kill', time: 30 },
-        { id: '2', type: 'death', time: 80 },
-        { id: '3', type: 'assist', time: 140 },
+        { id: '1', type: 'kill', time: 230 },
+        { id: '2', type: 'death', time: 280 },
+        { id: '3', type: 'assist', time: 340 },
       ],
       source,
     ),
@@ -218,16 +219,17 @@ function plan() {
 test('host creates a NEW validated timeline with correct tracks and synced audio', async () => {
   const f = fixture(),
     result = await f.host.generate(plan());
-  assert.equal(result.clips, 3);
+  assert.equal(result.clips, 4);
   assert.equal(result.audioTracks, 1);
   assert.equal(f.sequences.length, 1);
-  assert.equal(f.created.video[0].items.length, 1);
+  assert.equal(f.created.video[0].items.length, 2);
   assert.equal(f.created.video[1].items.length, 1);
   assert.equal(f.created.video[2].items.length, 1);
   assert.equal(f.items[0].name, 'game.mp4');
-  assert.match(f.items[1].name, /^EOL_1번클립\(킬\)_[a-z0-9_]+$/);
-  assert.match(f.items[2].name, /^EOL_2번클립\(데스\)_[a-z0-9_]+$/);
-  assert.match(f.items[3].name, /^EOL_3번클립\(어시\)_[a-z0-9_]+$/);
+  assert.match(f.items[1].name, /^EOL_1번클립\(오프닝\)_[a-z0-9_]+$/);
+  assert.match(f.items[2].name, /^EOL_2번클립\(킬\)_[a-z0-9_]+$/);
+  assert.match(f.items[3].name, /^EOL_3번클립\(데스\)_[a-z0-9_]+$/);
+  assert.match(f.items[4].name, /^EOL_4번클립\(어시\)_[a-z0-9_]+$/);
   assert.ok(!f.created.name.includes('INCOMPLETE'));
 });
 test('host failures remove the incomplete sequence and generated subclips', async () => {

@@ -6,10 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { probe, frame, run, bin } from './media.js';
-import { analyze, ocrPool, readKda } from './analyzer.js';
+import { analyze, ocrPool, readKda, readGameClock } from './analyzer.js';
 import {
   VERSION,
   DEFAULT_ROI,
+  DEFAULT_CLOCK_ROI,
   cacheKey,
   planClips,
   trimPlan,
@@ -77,7 +78,7 @@ export async function createApp({
   async function perform(job, signal) {
     try {
       await verifySource(job.source);
-      const key = cacheKey(job.source, job.options.roi, job.options.interval);
+      const key = cacheKey(job.source, job.options.roi, job.options.interval, job.options.clockRoi);
       const cacheFile = path.join(STORE, 'cache', `${key}.json`);
       let cached;
       try {
@@ -197,6 +198,7 @@ export async function createApp({
           ffprobe: tools[1].status === 'fulfilled',
           active,
           defaultRoi: DEFAULT_ROI,
+          defaultClockRoi: DEFAULT_CLOCK_ROI,
         });
       }
       if (req.method === 'GET' && url.pathname === '/api/files') {
@@ -232,7 +234,10 @@ export async function createApp({
         const data = await frame(s, b.time, b.roi);
         const pool = await ocrPool();
         try {
-          return json(res, await readKda(pool, data));
+          return json(
+            res,
+            b.kind === 'clock' ? await readGameClock(pool, data) : await readKda(pool, data),
+          );
         } finally {
           await pool.terminate();
         }
@@ -278,10 +283,12 @@ export async function createApp({
           source = getSource(b.sourceId);
         const options = {
           roi: b.roi ?? DEFAULT_ROI,
+          clockRoi: b.clockRoi ?? DEFAULT_CLOCK_ROI,
           interval: number(b.interval ?? 0.5, '샘플 간격', 0.25, 2),
           workers: b.workers ?? 'auto',
         };
         roiPixels(options.roi, source.width, source.height);
+        roiPixels(options.clockRoi, source.width, source.height);
         if (options.workers !== 'auto') number(options.workers, '워커', 1, 8);
         const job = {
           id: randomUUID(),
@@ -314,7 +321,12 @@ export async function createApp({
           if (job.status !== 'done') throw new Error('완료된 분석만 수정할 수 있습니다.');
           const b = await body(req),
             events = normalizeEvents(b.events, job.source.in, job.source.out);
-          if (b.settings) planClips(events, job.source, b.settings);
+          if (b.settings)
+            planClips(
+              events,
+              { ...job.source, openingWindow: job.result?.openingWindow },
+              b.settings,
+            );
           if (
             JSON.stringify(events) !== JSON.stringify(job.events) ||
             (b.settings && JSON.stringify(b.settings) !== JSON.stringify(job.settings))
@@ -332,7 +344,15 @@ export async function createApp({
           const settings = b.settings ?? job.settings ?? {};
           const sameSettings = JSON.stringify(settings) === JSON.stringify(job.settings);
           const overrides = b.overrides ?? (sameSettings ? job.overrides : {});
-          const plan = trimPlan(planClips(job.events, job.source, settings), overrides, job.source);
+          const plan = trimPlan(
+            planClips(
+              job.events,
+              { ...job.source, openingWindow: job.result?.openingWindow },
+              settings,
+            ),
+            overrides,
+            job.source,
+          );
           job.settings = settings;
           job.overrides = overrides ?? {};
           await persist(job);

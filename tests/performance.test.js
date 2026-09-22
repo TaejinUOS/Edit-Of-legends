@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { threadCandidates, fastestThreads, memoizeOcr } from '../engine/performance.js';
-import { readKda } from '../engine/analyzer.js';
+import { readKda, readGameClock } from '../engine/analyzer.js';
 
 test('decoder candidates reserve capacity for simultaneous OCR', () => {
   assert.deepEqual(threadCandidates(16, 4), [4, 5, 6, 7, 8]);
@@ -45,6 +45,23 @@ test('HUD results share concurrent recognition and distinguish dimensions and ch
   raw[0]++;
   await readKda(pool, raw, info);
   assert.equal(calls, 3);
+});
+
+test('game clock OCR reads mm:ss and caches identical HUD pixels', async () => {
+  let calls = 0;
+  const pool = {
+    addJob: async () => {
+      calls++;
+      return { data: { text: '03:30', confidence: 92 } };
+    },
+  };
+  const raw = Buffer.alloc(200, 100);
+  const info = { width: 20, height: 10 };
+  const first = await readGameClock(pool, raw, info);
+  const second = await readGameClock(pool, raw, info);
+  assert.equal(first.clockSeconds, 210);
+  assert.deepEqual(second, first);
+  assert.equal(calls, 1);
 });
 
 test('OCR cache retries errors and evicts least recently used entries', async () => {

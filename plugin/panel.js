@@ -59,6 +59,7 @@ function updateControls() {
   $('connection-file').disabled = busy;
   $('source').disabled = !connected || busy;
   $('review').disabled = !connected;
+  $('clock-test').disabled = !connected || !source || busy;
   $('analyze').disabled = !connected || !source || busy;
   $('cancel').disabled = !busy;
   $('refresh').disabled = !connected || busy;
@@ -135,11 +136,7 @@ async function api(route, method = 'GET', data) {
 }
 
 function validateConnection(candidate) {
-  if (
-    candidate?.url !== ENGINE_URL ||
-    typeof candidate.token !== 'string' ||
-    !candidate.token
-  )
+  if (candidate?.url !== ENGINE_URL || typeof candidate.token !== 'string' || !candidate.token)
     throw Error('이 프로젝트의 .eol/connection.json을 선택하세요.');
   return candidate;
 }
@@ -191,7 +188,9 @@ async function startCompanion(candidate) {
     } catch (error) {
       lastError = error;
       if (error.status === 401)
-        throw Error('다른 인증 정보로 실행 중인 엔진이 있습니다. 기존 엔진을 종료한 뒤 다시 시도하세요.');
+        throw Error(
+          '다른 인증 정보로 실행 중인 엔진이 있습니다. 기존 엔진을 종료한 뒤 다시 시도하세요.',
+        );
     }
   }
   throw Error(`분석 엔진이 준비되지 않았습니다. ${lastError?.message || ''}`.trim());
@@ -280,13 +279,15 @@ function readSettings() {
   if (!Number.isFinite(values.gap) || values.gap < 0 || values.gap > 60)
     throw Error('동시 판정은 0–60초로 입력하세요.');
   values.types = ['kill', 'assist', 'death'].filter((type) => $(type).checked);
-  if (!values.types.length) throw Error('이벤트 유형을 하나 이상 선택하세요.');
   return values;
 }
 
-function readRoi() {
+function readRoi(prefix = '', label = 'HUD') {
   const values = Object.fromEntries(
-    ['x', 'y', 'width', 'height'].map((key) => [key, Number($(key).value) / 100]),
+    ['x', 'y', 'width', 'height'].map((key) => [
+      key,
+      Number($((prefix ? prefix + '-' : '') + key).value) / 100,
+    ]),
   );
   if (
     Object.values(values).some((value) => !Number.isFinite(value)) ||
@@ -297,7 +298,7 @@ function readRoi() {
     values.x + values.width > 1 ||
     values.y + values.height > 1
   )
-    throw Error('HUD 영역이 화면 밖으로 나가지 않도록 입력하세요.');
+    throw Error(`${label} 영역이 화면 밖으로 나가지 않도록 입력하세요.`);
   return values;
 }
 
@@ -341,12 +342,17 @@ function renderEvents() {
   }
   const events = job.events ?? [];
   const included = events.filter((event) => event.included).length;
+  const openingStatus = job.result?.openingWindow
+    ? '인게임 0:50–3:30 포함'
+    : '인게임 시계 재분석 필요';
   $('summary').textContent =
-    `${events.length}개 이벤트 · 포함 ${included}개 · K/D/A ${job.result?.finalKda?.join(' / ') ?? '—'} · 검토 ${events.filter((event) => event.review).length}개`;
+    `${events.length}개 이벤트 · 포함 ${included}개 · K/D/A ${job.result?.finalKda?.join(' / ') ?? '—'} · 검토 ${events.filter((event) => event.review).length}개 · ${openingStatus}`;
   if (!events.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-events';
-    empty.textContent = '감지된 이벤트가 없습니다.';
+    empty.textContent = job.result?.openingWindow
+      ? '감지된 이벤트가 없습니다. 인게임 0:50–3:30 클립은 생성됩니다.'
+      : '감지된 이벤트가 없습니다. 인게임 시계를 다시 분석하세요.';
     list.appendChild(empty);
     return;
   }
@@ -425,6 +431,7 @@ $('connection-file').onclick = safe(async () => {
 $('source').onclick = safe(async () => {
   if (isAnalyzing() || generating) throw Error('현재 작업을 완료하거나 취소하세요.');
   source = await api('sources', 'POST', await host.selectedSource());
+  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 90));
   job = null;
   renderEvents();
   clearProgress();
@@ -443,12 +450,28 @@ $('review').onclick = safe(async () => {
   if (result) throw Error('검토 화면을 열지 못했습니다: ' + result);
 });
 
+$('clock-test').onclick = safe(async () => {
+  if (!source) throw Error('선택 클립을 먼저 불러오세요.');
+  const result = await api('ocr', 'POST', {
+    sourceId: source.id,
+    time: Number($('clock-time').value),
+    roi: readRoi('clock', '시계 HUD'),
+    kind: 'clock',
+  });
+  showMessage(
+    result.clockSeconds === null
+      ? '인게임 시계를 읽지 못했습니다. 시계 영역이나 확인할 시각을 조정하세요.'
+      : `인게임 시계 판독: ${result.text} (${result.confidence.toFixed(0)}%)`,
+  );
+});
+
 $('analyze').onclick = safe(async () => {
   if (!source) throw Error('선택 클립을 먼저 불러오세요.');
   readSettings();
   job = await api('jobs', 'POST', {
     sourceId: source.id,
     roi: readRoi(),
+    clockRoi: readRoi('clock', '시계 HUD'),
     workers: $('workers').value,
     interval: 0.5,
   });
@@ -486,6 +509,10 @@ $('load-job').onclick = safe(async () => {
   setSettings(job.settings);
   for (const key of ['x', 'y', 'width', 'height'])
     $(key).value = String(job.options.roi[key] * 100);
+  const clockRoi = job.options.clockRoi ?? { x: 0.945, y: 0.001, width: 0.05, height: 0.025 };
+  for (const key of ['x', 'y', 'width', 'height'])
+    $('clock-' + key).value = String(clockRoi[key] * 100);
+  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 90));
   setSourceInfo(
     `${source.name}\n${source.in.toFixed(2)}–${source.out.toFixed(2)}초 · ${source.width}×${source.height}`,
   );
