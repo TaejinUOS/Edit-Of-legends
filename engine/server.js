@@ -7,10 +7,15 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { probe, frame, run, bin, isSupportedVideo } from './media.js';
 import { analyze, ocrPool, readKda, readGameClock } from './analyzer.js';
+import { readFlash } from './flash.js';
 import {
   VERSION,
   DEFAULT_ROI,
+  defaultKdaRoi,
+  defaultFlashRois,
+  resolveKdaRoi,
   DEFAULT_CLOCK_ROI,
+  flashOptions,
   cacheKey,
   planClips,
   trimPlan,
@@ -78,7 +83,13 @@ export async function createApp({
   async function perform(job, signal) {
     try {
       await verifySource(job.source);
-      const key = cacheKey(job.source, job.options.roi, job.options.interval, job.options.clockRoi);
+      const key = cacheKey(
+        job.source,
+        job.options.roi,
+        job.options.interval,
+        job.options.clockRoi,
+        job.options.flash,
+      );
       const cacheFile = path.join(STORE, 'cache', `${key}.json`);
       let cached;
       try {
@@ -214,6 +225,8 @@ export async function createApp({
       if (req.method === 'POST' && url.pathname === '/api/sources') {
         const b = await body(req),
           source = { ...(await probe(b.path, b)), id: randomUUID() };
+        source.defaultRoi = defaultKdaRoi(source);
+        source.defaultFlashRois = defaultFlashRois(source);
         sources.set(source.id, source);
         return json(res, source);
       }
@@ -229,12 +242,20 @@ export async function createApp({
         const b = await body(req),
           s = getSource(b.sourceId);
         await verifySource(s);
-        const data = await frame(s, b.time, b.roi);
+        const data = await frame(
+          s,
+          b.time,
+          b.kind === 'flash' ? flashOptions(b.flash, s).roi : b.roi,
+        );
         const pool = await ocrPool();
         try {
           return json(
             res,
-            b.kind === 'clock' ? await readGameClock(pool, data) : await readKda(pool, data),
+            b.kind === 'flash'
+              ? await readFlash(pool, data)
+              : b.kind === 'clock'
+                ? await readGameClock(pool, data)
+                : await readKda(pool, data),
           );
         } finally {
           await pool.terminate();
@@ -281,8 +302,9 @@ export async function createApp({
         const b = await body(req),
           source = getSource(b.sourceId);
         const options = {
-          roi: b.roi ?? DEFAULT_ROI,
+          roi: resolveKdaRoi(source, b.roi),
           clockRoi: b.clockRoi ?? DEFAULT_CLOCK_ROI,
+          flash: flashOptions(b.flash, source),
           interval: number(b.interval ?? 0.5, '샘플 간격', 0.25, 2),
           workers: b.workers ?? 'auto',
         };

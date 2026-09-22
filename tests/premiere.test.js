@@ -241,6 +241,17 @@ test('host failures remove the incomplete sequence and generated subclips', asyn
     ['game.mp4'],
   );
 });
+
+test('flash clips create V4 with the flash label and synchronized audio', async () => {
+  const f = fixture();
+  const source = plan().source;
+  const edit = { ...planClips([{ id: 'flash-1', type: 'flash', time: 260 }], source), source };
+  const result = await f.host.generate(edit);
+  assert.equal(result.clips, 2);
+  assert.equal(f.created.video[3].items.length, 1);
+  assert.match(f.items[2].name, /2번클립\(점멸\)/);
+  assert.equal(result.audioTracks, 1);
+});
 test('cancel before sequence creation leaves source untouched', async () => {
   const f = fixture();
   await assert.rejects(() => f.host.generate(plan(), { isCancelled: () => true }), /취소/);

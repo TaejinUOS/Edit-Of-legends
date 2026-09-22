@@ -270,6 +270,7 @@ select:focus { border-color: #7e8e37; }
 
 .event-type-grid {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
@@ -302,6 +303,7 @@ select:focus { border-color: #7e8e37; }
 .v1 { background: #d7ff36; }
 .v2 { background: #63d4ff; }
 .v3 { background: #ff7b8d; }
+.v4 { background: #ffc963; }
 
 .action-row { gap: 6px; }
 .cancel-button { flex: 0 0 54px; }

@@ -77,7 +77,7 @@ function adapter(ppro) {
         c.inFrame < last ||
         c.outputInFrame !== cursor ||
         c.outputOutFrame - c.outputInFrame !== c.outFrame - c.inFrame ||
-        ![0, 1, 2].includes(c.track) ||
+        ![0, 1, 2, 3].includes(c.track) ||
         c.inFrame < Math.ceil(plan.source.in * plan.fpsNum - 1e-7) ||
         c.outFrame > Math.floor(plan.source.out * plan.fpsNum + 1e-7)
       )
@@ -136,7 +136,9 @@ function adapter(ppro) {
     try {
       project = ppro.Project.getProject(projectGuid);
       const root = await project.getRootItem();
-      const leftovers = (await descendants(root)).filter((item) => artifactNames.includes(item.name));
+      const leftovers = (await descendants(root)).filter((item) =>
+        artifactNames.includes(item.name),
+      );
       if (leftovers.length) {
         const entries = leftovers.map((item) => ({ item, parent: item.getParentBin() }));
         transaction(project, 'EditOfLegends: 실패 항목 정리', () =>
@@ -165,10 +167,15 @@ function adapter(ppro) {
       );
     const uid = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
     const prefix = 'EOL_' + uid;
-    const eventLabels = { opening: '오프닝', kill: '킬', assist: '어시', death: '데스' };
+    const eventLabels = {
+      opening: '오프닝',
+      kill: '킬',
+      assist: '어시',
+      death: '데스',
+      flash: '점멸',
+    };
     const names = plan.clips.map(
-      (clip, index) =>
-        `EOL_${index + 1}번클립(${eventLabels[clip.type] ?? clip.type})_${uid}`,
+      (clip, index) => `EOL_${index + 1}번클립(${eventLabels[clip.type] ?? clip.type})_${uid}`,
     );
     let sequenceGuid = null,
       stage = '서브클립 생성';
@@ -315,7 +322,7 @@ function adapter(ppro) {
         tracksToRename = [];
       for (let i = 0; i < (await sequence.getVideoTrackCount()); i++) {
         const track = await sequence.getVideoTrack(i);
-        if (i < 3) tracksToRename.push({ track, index: i });
+        if (i < 4) tracksToRename.push({ track, index: i });
         for (const item of await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false))
           actual.push({
             track: i,
@@ -361,7 +368,9 @@ function adapter(ppro) {
       const sequenceItem = await sequence.getProjectItem();
       transaction(project, 'EditOfLegends: 생성 완료', () => [
         ...tracksToRename.map(({ track, index }) =>
-          track.createSetNameAction(['EOL · 오프닝/킬', 'EOL · 어시', 'EOL · 데스'][index]),
+          track.createSetNameAction(
+            ['EOL · 오프닝/킬', 'EOL · 어시', 'EOL · 데스', 'EOL · 점멸'][index],
+          ),
         ),
         sequenceItem.createSetNameAction(name),
       ]);

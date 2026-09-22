@@ -199,8 +199,37 @@ export async function frame(source, time, roi = null) {
 
 export async function* sampleFrames(source, roi, interval, signal, threads = 4) {
   threads = Math.floor(number(threads, 'FFmpeg threads', 1, 8));
-  const r = roiPixels(roi, source.width, source.height),
-    bytes = r.width * r.height;
+  // Multiple HUD regions share one decode pass. Stack the crops horizontally
+  // instead of transferring the full frame between the top and bottom HUDs.
+  const multiple = Array.isArray(roi);
+  const regions = (multiple ? roi : [roi]).map((area) =>
+    roiPixels(area, source.width, source.height),
+  );
+  const width = regions.reduce((sum, area) => sum + area.width, 0);
+  const height = Math.max(...regions.map((area) => area.height));
+  const bytes = width * height;
+  const fpsFilter = `fps=${1 / interval}:start_time=0:round=up`;
+  const filters =
+    regions.length === 1
+      ? [
+          '-vf',
+          `${fpsFilter},crop=${regions[0].width}:${regions[0].height}:${regions[0].x}:${regions[0].y},format=gray`,
+        ]
+      : [
+          '-filter_complex_threads',
+          '1',
+          '-filter_complex',
+          `[0:v]${fpsFilter},format=gray,split=${regions.length}${regions.map((_, i) => `[s${i}]`).join('')};` +
+            regions
+              .map(
+                (r, i) =>
+                  `[s${i}]crop=${r.width}:${r.height}:${r.x}:${r.y},pad=${r.width}:${height}:0:0[c${i}]`,
+              )
+              .join(';') +
+            `;${regions.map((_, i) => `[c${i}]`).join('')}hstack=inputs=${regions.length}[hud]`,
+          '-map',
+          '[hud]',
+        ];
   const p = spawn(
     bin('ffmpeg'),
     [
@@ -218,8 +247,7 @@ export async function* sampleFrames(source, roi, interval, signal, threads = 4) 
       '-an',
       '-filter_threads',
       '1',
-      '-vf',
-      `fps=${1 / interval}:start_time=0:round=up,crop=${r.width}:${r.height}:${r.x}:${r.y},format=gray`,
+      ...filters,
       '-f',
       'rawvideo',
       '-pix_fmt',
@@ -251,7 +279,20 @@ export async function* sampleFrames(source, roi, interval, signal, threads = 4) 
         const raw = buffer.subarray(0, bytes);
         buffer = buffer.subarray(bytes);
         const time = source.in + index++ * interval;
-        if (time < source.out) yield { raw, width: r.width, height: r.height, time };
+        if (time < source.out) {
+          if (!multiple) yield { raw, width, height, time };
+          else {
+            let left = 0;
+            const crops = regions.map((r) => {
+              const cropped = Buffer.allocUnsafe(r.width * r.height);
+              for (let y = 0; y < r.height; y++)
+                raw.copy(cropped, y * r.width, y * width + left, y * width + left + r.width);
+              left += r.width;
+              return { raw: cropped, width: r.width, height: r.height, time };
+            });
+            yield { time, regions: crops };
+          }
+        }
       }
     }
     const code = await completed;

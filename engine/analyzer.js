@@ -11,7 +11,9 @@ import {
   number,
   roiPixels,
   DEFAULT_CLOCK_ROI,
+  flashOptions,
 } from './core.js';
+import { readFlash, detectFlashEvents } from './flash.js';
 import { sampleFrames, verifyCfr } from './media.js';
 import { glyphImages } from './ocr-image.js';
 import { threadCandidates, fastestThreads, memoizeOcr } from './performance.js';
@@ -133,6 +135,8 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
   roiPixels(options.roi, source.width, source.height);
   const clockRoi = options.clockRoi ?? DEFAULT_CLOCK_ROI;
   roiPixels(clockRoi, source.width, source.height);
+  const flash = flashOptions(options.flash, source);
+  roiPixels(flash.roi, source.width, source.height);
   const available = os.availableParallelism();
   const workers =
     options.workers === 'auto' || !options.workers
@@ -219,7 +223,9 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
           workers,
           decoderThreads,
         });
-      if (value.clockSeconds >= 220) {
+      // A stable source/game offset locates both boundaries; decoding all the
+      // way past 3:30 is unnecessary, especially for a short selected range.
+      if (value.clockSeconds !== null) {
         try {
           detectOpeningWindow(clockSamples, source);
           break;
@@ -238,15 +244,20 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       samples.push(...values);
       const t = samples.at(-1)?.time ?? source.in;
       onProgress({
-        stage: 'K/D/A 분석',
+        stage: flash.enabled ? 'K/D/A · 점멸 분석' : 'K/D/A 분석',
         progress: Math.min(0.99, 0.1 + (0.89 * (t - source.in)) / (source.out - source.in)),
         samples: samples.length,
         workers,
         decoderThreads,
       });
     };
-    for await (const f of sampleFrames(source, options.roi, interval, signal, decoderThreads)) {
-      const pending = readKda(pool, f.raw, f).then((value) => ({ time: f.time, ...value }));
+    const regions = flash.enabled ? [options.roi, flash.roi] : [options.roi];
+    for await (const f of sampleFrames(source, regions, interval, signal, decoderThreads)) {
+      const [kdaFrame, flashFrame] = f.regions;
+      const pending = Promise.all([
+        readKda(pool, kdaFrame.raw, kdaFrame),
+        flash.enabled ? readFlash(pool, flashFrame.raw, flashFrame) : null,
+      ]).then(([value, flashValue]) => ({ time: f.time, ...value, flash: flashValue }));
       pending.catch(() => {});
       batch.push(pending);
       if (batch.length >= workers * 2) await flush();
@@ -254,6 +265,14 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
     if (batch.length) await flush();
     if (signal?.aborted) throw new Error('분석을 취소했습니다.');
     const result = detectEvents(samples, interval);
+    const flashSamples = flash.enabled ? samples.map((s) => ({ time: s.time, ...s.flash })) : [];
+    result.events.push(...detectFlashEvents(flashSamples, interval));
+    result.events.sort((a, b) => a.time - b.time);
+    if (flash.enabled && !flashSamples.some((s) => s.state === 'ready'))
+      result.warnings.push({
+        time: source.in,
+        message: '점멸 준비 상태를 확인하지 못했습니다. 점멸 슬롯과 HUD 영역을 확인하세요.',
+      });
     if (!result.finalKda)
       throw new Error(
         'K/D/A를 읽지 못했습니다. 숫자 세 개와 / 구분자만 포함하도록 HUD 영역을 조정하세요.',
@@ -262,6 +281,7 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       ...result,
       openingWindow,
       clockSamples,
+      flash: { ...flash, readySamples: flashSamples.filter((s) => s.state === 'ready').length },
       samples,
       workers,
       interval,

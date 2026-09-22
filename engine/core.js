@@ -3,13 +3,57 @@ import { createHash } from 'node:crypto';
 export const VERSION = '0.2.2';
 // Bump only when OCR, sampling, event detection, or cached result compatibility changes.
 // App releases and performance-only changes must not invalidate analysis results.
-export const ANALYSIS_REVISION = 3;
-export const TYPES = ['kill', 'death', 'assist'];
-export const TRACKS = { kill: 0, assist: 1, death: 2 };
+export const ANALYSIS_REVISION = 5;
+export const TYPES = ['kill', 'death', 'assist', 'flash'];
+export const TRACKS = { kill: 0, assist: 1, death: 2, flash: 3 };
+export const FLASH_ROIS = {
+  D: { x: 0.516, y: 0.916, width: 0.015, height: 0.026 },
+  F: { x: 0.535, y: 0.916, width: 0.015, height: 0.026 },
+};
+
+export const FLASH_ROIS_1080 = {
+  D: { x: 0.509, y: 0.915, width: 0.015, height: 0.026 },
+  F: { x: 0.528, y: 0.915, width: 0.015, height: 0.026 },
+};
+
+export function defaultFlashRois(source) {
+  return source?.width === 1920 && source?.height === 1080 ? FLASH_ROIS_1080 : FLASH_ROIS;
+}
+
+export function flashOptions(value = {}, source) {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('점멸 분석 설정이 올바르지 않습니다.');
+  const enabled = value.enabled ?? true;
+  const slot = value.slot ?? 'F';
+  if (typeof enabled !== 'boolean' || !['D', 'F'].includes(slot))
+    throw new Error('점멸 슬롯은 D 또는 F여야 합니다.');
+  const legacyDefault =
+    value.roi &&
+    Object.keys(FLASH_ROIS[slot]).every(
+      (key) => Math.abs(value.roi[key] - FLASH_ROIS[slot][key]) < 1e-8,
+    );
+  const roi = !value.roi || legacyDefault ? defaultFlashRois(source)[slot] : value.roi;
+  roiPixels(roi, 2560, 1440);
+  return { enabled, slot, roi };
+}
 export const OPENING_GAME_START = 50;
 export const OPENING_GAME_END = 210;
 export const DEFAULT_ROI = { x: 0.867, y: 0.001, width: 0.039, height: 0.022 };
-export const DEFAULT_CLOCK_ROI = { x: 0.945, y: 0.001, width: 0.05, height: 0.025 };
+export const DEFAULT_ROI_1080 = { ...DEFAULT_ROI, x: 0.86 };
+
+export function defaultKdaRoi(source) {
+  return source.width === 1920 && source.height === 1080 ? DEFAULT_ROI_1080 : DEFAULT_ROI;
+}
+
+export function resolveKdaRoi(source, roi) {
+  // Migrate the old universal preset, including percentages round-tripped by
+  // the panel. Preserve user-defined crop coordinates.
+  const legacyDefault =
+    roi && Object.keys(DEFAULT_ROI).every((key) => Math.abs(roi[key] - DEFAULT_ROI[key]) < 1e-8);
+  return !roi || legacyDefault ? defaultKdaRoi(source) : roi;
+}
+// Exclude the clock icon on the left and the FPS/ping row below the digits.
+export const DEFAULT_CLOCK_ROI = { x: 0.968, y: 0.001, width: 0.025, height: 0.019 };
 
 export function number(value, name, min, max) {
   const n = Number(value);
@@ -274,7 +318,7 @@ export function planClips(events, source, settings = {}) {
   };
 }
 
-export function cacheKey(source, roi, interval, clockRoi = DEFAULT_CLOCK_ROI) {
+export function cacheKey(source, roi, interval, clockRoi = DEFAULT_CLOCK_ROI, flash = {}) {
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -286,6 +330,7 @@ export function cacheKey(source, roi, interval, clockRoi = DEFAULT_CLOCK_ROI) {
         out: source.out,
         roi,
         clockRoi,
+        flash: flashOptions(flash),
         interval,
       }),
     )

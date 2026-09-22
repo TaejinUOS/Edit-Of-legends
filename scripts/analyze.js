@@ -1,12 +1,14 @@
 import { probe } from '../engine/media.js';
 import { analyze } from '../engine/analyzer.js';
-import { DEFAULT_ROI, DEFAULT_CLOCK_ROI, planClips } from '../engine/core.js';
+import { defaultKdaRoi, DEFAULT_CLOCK_ROI, flashOptions, planClips } from '../engine/core.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { cacheKey } from '../engine/core.js';
 const file = process.argv[2];
 if (!file) {
-  console.error('사용: npm run analyze -- <영상.mp4 또는 영상.mkv> [시작초] [끝초]');
+  console.error(
+    '사용: npm run analyze -- <영상.mp4 또는 영상.mkv> [시작초] [끝초] [점멸 슬롯 F 또는 D]',
+  );
   process.exit(1);
 }
 const source = await probe(file, {
@@ -16,10 +18,12 @@ const source = await probe(file, {
 const controller = new AbortController();
 process.on('SIGINT', () => controller.abort());
 const startedAt = Date.now();
+const roi = defaultKdaRoi(source);
+const flash = flashOptions({ slot: process.argv[5] ?? 'F' }, source);
 let last = 0;
 const result = await analyze(
   source,
-  { roi: DEFAULT_ROI, clockRoi: DEFAULT_CLOCK_ROI, workers: 'auto', interval: 0.5 },
+  { roi, clockRoi: DEFAULT_CLOCK_ROI, flash, workers: 'auto', interval: 0.5 },
   controller.signal,
   (p) => {
     if (Date.now() - last > 5000 || p.progress === 0) {
@@ -32,12 +36,18 @@ const plan = planClips(result.events, { ...source, openingWindow: result.opening
 await mkdir('.eol', { recursive: true });
 await writeFile('.eol/analysis-report.json', JSON.stringify({ source, result, plan }, null, 2));
 const id = randomUUID(),
-  options = { roi: DEFAULT_ROI, clockRoi: DEFAULT_CLOCK_ROI, workers: 'auto', interval: 0.5 };
+  options = {
+    roi,
+    clockRoi: DEFAULT_CLOCK_ROI,
+    flash,
+    workers: 'auto',
+    interval: 0.5,
+  };
 source.id = randomUUID();
 await mkdir('.eol/jobs', { recursive: true });
 await mkdir('.eol/cache', { recursive: true });
 await writeFile(
-  `.eol/cache/${cacheKey(source, options.roi, options.interval, options.clockRoi)}.json`,
+  `.eol/cache/${cacheKey(source, options.roi, options.interval, options.clockRoi, options.flash)}.json`,
   JSON.stringify(result),
 );
 await writeFile(

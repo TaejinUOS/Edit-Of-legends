@@ -38,8 +38,8 @@ test(
       throw Error('Analysis timeout');
     };
     try {
-      const source = await json('sources', { path: file, in: 120, out: 122 });
-      const preview = await json('preview', { sourceId: source.id, time: 120 });
+      const source = await json('sources', { path: file, in: 283, out: 294 });
+      const preview = await json('preview', { sourceId: source.id, time: 283 });
       assert.match(preview.image, /^data:image\/png;base64,/);
       const media = await fetch(base + '/api/media/' + source.id, {
         headers: { Authorization: 'Bearer integration-only', Range: 'bytes=0-31' },
@@ -49,10 +49,19 @@ test(
       const first = await finish((await json('jobs', { sourceId: source.id, workers: 1 })).id);
       assert.equal(first.status, 'done', first.error);
       assert.deepEqual(first.result.finalKda, [0, 0, 0]);
-      assert.equal(first.events.length, 0);
+      assert.equal(first.events.length, 1);
+      assert.equal(first.events[0].type, 'flash');
+      assert.equal(first.events[0].time, 291);
+      assert.equal(first.events[0].included, true);
+      assert.equal(first.options.flash.slot, 'F');
+      assert.equal(first.result.openingWindow.in, 283);
+      assert.equal(first.result.openingWindow.out, 293);
       const second = await finish((await json('jobs', { sourceId: source.id, workers: 1 })).id);
       assert.equal(second.cached, true);
       const long = await json('sources', { path: file });
+      const flashPreview = await json('ocr', { sourceId: long.id, kind: 'flash', time: 300 });
+      assert.equal(flashPreview.state, 'cooldown');
+      assert.equal(flashPreview.cooldown, 245);
       const cancelled = await json('jobs', { sourceId: long.id, workers: 1 });
       await json('jobs/' + cancelled.id + '/cancel', {});
       assert.equal((await finish(cancelled.id)).status, 'cancelled');

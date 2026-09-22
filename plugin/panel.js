@@ -58,8 +58,18 @@ function updateControls() {
   $('connect').disabled = busy;
   $('connection-file').disabled = busy;
   $('source').disabled = !connected || busy;
+  for (const id of [
+    'flash-enabled',
+    'flash-slot',
+    'flash-x',
+    'flash-y',
+    'flash-width',
+    'flash-height',
+  ])
+    $(id).disabled = busy;
   $('review').disabled = !connected;
   $('clock-test').disabled = !connected || !source || busy;
+  $('flash-test').disabled = !connected || !source || busy;
   $('analyze').disabled = !connected || !source || busy;
   $('cancel').disabled = !busy;
   $('refresh').disabled = !connected || busy;
@@ -278,7 +288,7 @@ function readSettings() {
     throw Error('이후 시간은 0–120초로 입력하세요.');
   if (!Number.isFinite(values.gap) || values.gap < 0 || values.gap > 60)
     throw Error('동시 판정은 0–60초로 입력하세요.');
-  values.types = ['kill', 'assist', 'death'].filter((type) => $(type).checked);
+  values.types = ['kill', 'assist', 'death', 'flash'].filter((type) => $(type).checked);
   return values;
 }
 
@@ -305,8 +315,53 @@ function readRoi(prefix = '', label = 'HUD') {
 function setSettings(settings = {}) {
   const defaults = { before: 11, after: 7, gap: 15 };
   for (const key of Object.keys(defaults)) $(key).value = String(settings[key] ?? defaults[key]);
-  for (const type of ['kill', 'assist', 'death'])
-    $(type).checked = (settings.types ?? ['kill', 'assist', 'death']).includes(type);
+  for (const type of ['kill', 'assist', 'death', 'flash'])
+    $(type).checked = (settings.types ?? ['kill', 'assist', 'death', 'flash']).includes(type);
+}
+
+function applySourceKdaDefault() {
+  const roi = readRoi();
+  const isPreset =
+    [86, 86.7].some((x) => Math.abs(roi.x * 100 - x) < 1e-8) &&
+    Math.abs(roi.y - 0.001) < 1e-8 &&
+    Math.abs(roi.width - 0.039) < 1e-8 &&
+    Math.abs(roi.height - 0.022) < 1e-8;
+  if (!isPreset) return;
+  const preset = source.defaultRoi ?? {
+    x: source.width === 1920 && source.height === 1080 ? 0.86 : 0.867,
+    y: 0.001,
+    width: 0.039,
+    height: 0.022,
+  };
+  for (const key of ['x', 'y', 'width', 'height']) $(key).value = String(preset[key] * 100);
+}
+
+function sourceFlashRoi() {
+  const slot = $('flash-slot').value;
+  const small = source?.width === 1920 && source?.height === 1080;
+  return (
+    source?.defaultFlashRois?.[slot] ?? {
+      x: slot === 'D' ? (small ? 0.509 : 0.516) : small ? 0.528 : 0.535,
+      y: small ? 0.915 : 0.916,
+      width: 0.015,
+      height: 0.026,
+    }
+  );
+}
+
+function setFlashRoi(roi) {
+  for (const key of ['x', 'y', 'width', 'height']) $('flash-' + key).value = String(roi[key] * 100);
+}
+
+function applySourceFlashDefault() {
+  const roi = readRoi('flash', '점멸 HUD');
+  if (
+    [0.509, 0.516, 0.528, 0.535].some((x) => Math.abs(x - roi.x) < 1e-8) &&
+    [0.915, 0.916].some((y) => Math.abs(y - roi.y) < 1e-8) &&
+    Math.abs(roi.width - 0.015) < 1e-8 &&
+    Math.abs(roi.height - 0.026) < 1e-8
+  )
+    setFlashRoi(sourceFlashRoi());
 }
 
 function setSourceInfo(value) {
@@ -347,6 +402,9 @@ function renderEvents() {
     : '인게임 시계 재분석 필요';
   $('summary').textContent =
     `${events.length}개 이벤트 · 포함 ${included}개 · K/D/A ${job.result?.finalKda?.join(' / ') ?? '—'} · 검토 ${events.filter((event) => event.review).length}개 · ${openingStatus}`;
+  if (job.result?.warnings?.length)
+    $('summary').textContent +=
+      '\n' + job.result.warnings.map((warning) => warning.message).join('\n');
   if (!events.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-events';
@@ -356,8 +414,8 @@ function renderEvents() {
     list.appendChild(empty);
     return;
   }
-  const labels = { kill: '킬', assist: '어시', death: '데스' };
-  const tracks = { kill: 'V1', assist: 'V2', death: 'V3' };
+  const labels = { kill: '킬', assist: '어시', death: '데스', flash: '점멸' };
+  const tracks = { kill: 'V1', assist: 'V2', death: 'V3', flash: 'V4' };
   for (const event of events) {
     const row = document.createElement('label');
     row.className = 'event' + (event.review ? ' review' : '');
@@ -431,7 +489,10 @@ $('connection-file').onclick = safe(async () => {
 $('source').onclick = safe(async () => {
   if (isAnalyzing() || generating) throw Error('현재 작업을 완료하거나 취소하세요.');
   source = await api('sources', 'POST', await host.selectedSource());
-  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 90));
+  applySourceKdaDefault();
+  applySourceFlashDefault();
+  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 120));
+  $('flash-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 180));
   job = null;
   renderEvents();
   clearProgress();
@@ -465,6 +526,34 @@ $('clock-test').onclick = safe(async () => {
   );
 });
 
+function readFlashOptions() {
+  return {
+    enabled: $('flash-enabled').checked,
+    slot: $('flash-slot').value,
+    roi: readRoi('flash', '점멸 HUD'),
+  };
+}
+
+$('flash-slot').onchange = () => {
+  setFlashRoi(sourceFlashRoi());
+};
+
+$('flash-test').onclick = safe(async () => {
+  const result = await api('ocr', 'POST', {
+    sourceId: source.id,
+    kind: 'flash',
+    time: Number($('flash-time').value),
+    flash: readFlashOptions(),
+  });
+  showMessage(
+    result.state === 'ready'
+      ? '점멸 사용 가능 상태입니다.'
+      : result.state === 'cooldown'
+        ? `재사용 대기시간: ${result.cooldown}초`
+        : '점멸을 읽지 못했습니다. 슬롯, HUD 영역 또는 확인할 시각을 조정하세요.',
+  );
+});
+
 $('analyze').onclick = safe(async () => {
   if (!source) throw Error('선택 클립을 먼저 불러오세요.');
   readSettings();
@@ -472,6 +561,7 @@ $('analyze').onclick = safe(async () => {
     sourceId: source.id,
     roi: readRoi(),
     clockRoi: readRoi('clock', '시계 HUD'),
+    flash: readFlashOptions(),
     workers: $('workers').value,
     interval: 0.5,
   });
@@ -509,10 +599,22 @@ $('load-job').onclick = safe(async () => {
   setSettings(job.settings);
   for (const key of ['x', 'y', 'width', 'height'])
     $(key).value = String(job.options.roi[key] * 100);
-  const clockRoi = job.options.clockRoi ?? { x: 0.945, y: 0.001, width: 0.05, height: 0.025 };
+  const clockRoi = job.options.clockRoi ?? { x: 0.968, y: 0.001, width: 0.025, height: 0.019 };
+  const flash = job.options.flash ?? { enabled: true, slot: 'F' };
+  $('flash-enabled').checked = flash.enabled;
+  $('flash-slot').value = flash.slot;
+  const flashRoi = flash.roi ?? {
+    x: flash.slot === 'D' ? 0.516 : 0.535,
+    y: 0.916,
+    width: 0.015,
+    height: 0.026,
+  };
+  for (const key of ['x', 'y', 'width', 'height'])
+    $('flash-' + key).value = String(flashRoi[key] * 100);
+  $('flash-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 180));
   for (const key of ['x', 'y', 'width', 'height'])
     $('clock-' + key).value = String(clockRoi[key] * 100);
-  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 90));
+  $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 120));
   setSourceInfo(
     `${source.name}\n${source.in.toFixed(2)}–${source.out.toFixed(2)}초 · ${source.width}×${source.height}`,
   );

@@ -63,6 +63,10 @@
               ><input id="assist" type="checkbox" checked /><span class="track v2">V2</span>
               어시</label
             >
+            <label
+              ><input id="flash" type="checkbox" checked /><span class="track v4">V4</span>
+              점멸</label
+            >
           </div>
         </div>
         <div class="action-row">
@@ -148,23 +152,36 @@
           </div>
           <div class="setting-block hud-block">
             <div class="setting-heading">
-              <strong>인게임 시계 영역 <small>화면 비율 %</small></strong>
-              <button id="clock-test" class="text-button">시계 판독 확인</button>
+              <strong>본인 점멸</strong>
+              <button id="flash-test" class="text-button">점멸 판독 확인</button>
             </div>
+            <label><input id="flash-enabled" type="checkbox" checked /> 점멸 사용 분석</label>
+            <label
+              >점멸 슬롯<select id="flash-slot">
+                <option value="F" selected>F · 오른쪽</option>
+                <option value="D">D · 왼쪽</option>
+              </select></label
+            >
             <div class="field-grid four roi">
               <label
-                >X<input id="clock-x" value="94.5" type="number" min="0" max="100" step="0.1"
+                >X<input id="flash-x" value="53.5" type="number" min="0" max="100" step="0.1"
               /></label>
               <label
-                >Y<input id="clock-y" value="0.1" type="number" min="0" max="100" step="0.1"
+                >Y<input id="flash-y" value="91.6" type="number" min="0" max="100" step="0.1"
               /></label>
               <label
-                >너비<input id="clock-width" value="5" type="number" min="0.1" max="100" step="0.1"
+                >너비<input
+                  id="flash-width"
+                  value="1.5"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
               /></label>
               <label
                 >높이<input
-                  id="clock-height"
-                  value="2.5"
+                  id="flash-height"
+                  value="2.6"
                   type="number"
                   min="0.1"
                   max="100"
@@ -173,7 +190,43 @@
             </div>
             <label
               >확인할 영상 시각 <small>초</small
-              ><input id="clock-time" type="number" value="90" min="0" step="0.5"
+              ><input id="flash-time" type="number" value="180" min="0" step="0.5"
+            /></label>
+          </div>
+          <div class="setting-block hud-block">
+            <div class="setting-heading">
+              <strong>인게임 시계 영역 <small>화면 비율 %</small></strong>
+              <button id="clock-test" class="text-button">시계 판독 확인</button>
+            </div>
+            <div class="field-grid four roi">
+              <label
+                >X<input id="clock-x" value="96.8" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >Y<input id="clock-y" value="0.1" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >너비<input
+                  id="clock-width"
+                  value="2.5"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+              /></label>
+              <label
+                >높이<input
+                  id="clock-height"
+                  value="1.9"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+              /></label>
+            </div>
+            <label
+              >확인할 영상 시각 <small>초</small
+              ><input id="clock-time" type="number" value="120" min="0" step="0.5"
             /></label>
           </div>
         </div>
