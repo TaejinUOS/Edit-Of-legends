@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { cacheKey } from '../engine/core.js';
 const file = process.argv[2];
 if (!file) {
-  console.error('사용: npm run analyze -- <영상.mp4> [시작초] [끝초]');
+  console.error('사용: npm run analyze -- <영상.mp4 또는 영상.mkv> [시작초] [끝초]');
   process.exit(1);
 }
 const source = await probe(file, {

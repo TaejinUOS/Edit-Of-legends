@@ -11,6 +11,8 @@ const bundledBins = {
 };
 
 export const bin = (name) => process.env[name.toUpperCase() + '_PATH'] || bundledBins[name] || name;
+export const isSupportedVideo = (file) =>
+  ['.mp4', '.mkv'].includes(path.extname(file).toLowerCase());
 export function run(command, args, { signal, maxBytes = 24 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(command, args, { windowsHide: true, signal });
@@ -40,11 +42,11 @@ export function run(command, args, { signal, maxBytes = 24 * 1024 * 1024 } = {})
 
 export async function probe(file, range = {}) {
   if (typeof file !== 'string' || !file || /^(\\\\|\/\/|https?:)/i.test(file))
-    throw new Error('로컬 MP4 파일 경로가 필요합니다.');
+    throw new Error('로컬 MP4 또는 MKV 파일 경로가 필요합니다.');
   const resolved = await realpath(file);
   const info = await stat(resolved);
-  if (!info.isFile() || path.extname(resolved).toLowerCase() !== '.mp4')
-    throw new Error('MP4 파일을 선택하세요.');
+  if (!info.isFile() || !isSupportedVideo(resolved))
+    throw new Error('MP4 또는 MKV 파일을 선택하세요.');
   const data = JSON.parse(
     await run(bin('ffprobe'), [
       '-v',
@@ -73,7 +75,18 @@ export async function probe(file, range = {}) {
   const end = number(range.out ?? duration, '끝', 0, duration);
   if (end <= start || end - start > 7200)
     throw new Error('분석 범위는 0초 초과, 2시간 이하여야 합니다.');
-  if (Math.abs(Number(video.start_time ?? 0)) > 1 / fpsNum)
+  // MKV can retain one AAC encoder-delay frame at the start (e.g. 21 ms
+  // at 48 kHz), with millisecond rounding. Keep the original timestamps.
+  const startTolerance =
+    path.extname(resolved).toLowerCase() === '.mkv'
+      ? Math.max(
+          1 / fpsNum,
+          ...data.streams
+            .filter((s) => s.codec_type === 'audio' && s.codec_name === 'aac' && +s.sample_rate > 0)
+            .map((s) => 1024 / +s.sample_rate),
+        ) + 0.001
+      : 1 / fpsNum;
+  if (Math.abs(Number(video.start_time ?? 0)) > startTolerance)
     throw new Error('0초에서 시작하는 미디어만 지원합니다.');
   const audio = data.streams
     .filter((s) => s.codec_type === 'audio')
@@ -86,7 +99,8 @@ export async function probe(file, range = {}) {
     }));
   if (
     audio.some(
-      (s) => s.codec !== 'aac' || ![1, 2].includes(s.channels) || Math.abs(s.start) > 1 / fpsNum,
+      (s) =>
+        s.codec !== 'aac' || ![1, 2].includes(s.channels) || Math.abs(s.start) > startTolerance,
     )
   )
     throw new Error('동기화된 모노/스테레오 AAC 오디오만 지원합니다.');
@@ -107,6 +121,7 @@ export async function probe(file, range = {}) {
 }
 
 export async function verifyCfr(source, signal) {
+  const isMkv = path.extname(source.path).toLowerCase() === '.mkv';
   // Check packet durations too: equal nominal/average rates alone do not prove CFR.
   const out = await run(
     bin('ffprobe'),
@@ -116,19 +131,37 @@ export async function verifyCfr(source, signal) {
       '-select_streams',
       'v:0',
       '-show_entries',
-      'packet=duration_time',
+      isMkv ? 'packet=pts_time' : 'packet=duration_time',
       '-of',
       'csv=p=0',
       source.path,
     ],
     { signal },
   );
-  const durations = out.toString().trim().split(/\r?\n/).map(Number);
+  const values = out.toString().trim().split(/\r?\n/).map(Number);
   const expected = source.fpsDen / source.fpsNum;
-  if (
-    !durations.length ||
-    durations.some((v) => !Number.isFinite(v) || Math.abs(v - expected) > 0.00001)
-  )
+  // Matroska timestamps are quantized to milliseconds. Sort presentation
+  // timestamps because B-frames arrive in decode order; packet durations alone
+  // can report a constant nominal interval even for variable-rate MKV files.
+  if (isMkv) values.sort((a, b) => a - b);
+  const invalid = isMkv
+    ? values.some((v, i) => {
+        if (!Number.isFinite(v)) return true;
+        const drift = v - values[0] - i * expected;
+        if (Math.abs(drift) <= 0.00101) return false;
+        // OBS may omit up to two frames immediately before the final packet
+        // when recording stops. Allow only that terminal gap, on the CFR grid.
+        const missing = Math.round(drift / expected);
+        return !(
+          i === values.length - 1 &&
+          i > 0 &&
+          missing >= 1 &&
+          missing <= 2 &&
+          Math.abs(drift - missing * expected) <= 0.00101
+        );
+      })
+    : values.some((v) => !Number.isFinite(v) || Math.abs(v - expected) > 0.00001);
+  if (!out.toString().trim() || invalid)
     throw new Error('가변 프레임 간격이 감지되었습니다. CFR 사본으로 다시 시도하세요.');
 }
 

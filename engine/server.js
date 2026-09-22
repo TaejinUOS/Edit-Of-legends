@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { probe, frame, run, bin } from './media.js';
+import { probe, frame, run, bin, isSupportedVideo } from './media.js';
 import { analyze, ocrPool, readKda } from './analyzer.js';
 import {
   VERSION,
@@ -202,9 +202,7 @@ export async function createApp({
       if (req.method === 'GET' && url.pathname === '/api/files') {
         let names = [];
         try {
-          names = (await readdir(path.join(ROOT, 'src-video'))).filter((n) =>
-            n.toLowerCase().endsWith('.mp4'),
-          );
+          names = (await readdir(path.join(ROOT, 'src-video'))).filter(isSupportedVideo);
         } catch {}
         return json(
           res,
@@ -259,7 +257,8 @@ export async function createApp({
           }
         }
         res.writeHead(range ? 206 : 200, {
-          'Content-Type': 'video/mp4',
+          'Content-Type':
+            path.extname(s.path).toLowerCase() === '.mkv' ? 'video/x-matroska' : 'video/mp4',
           'Accept-Ranges': 'bytes',
           'Content-Length': end - start + 1,
           ...(range ? { 'Content-Range': `bytes ${start}-${end}/${s.size}` } : {}),
