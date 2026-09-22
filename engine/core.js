@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto';
 export const VERSION = '0.2.2';
 // Bump only when OCR, sampling, event detection, or cached result compatibility changes.
 // App releases and performance-only changes must not invalidate analysis results.
-export const ANALYSIS_REVISION = 2;
+export const ANALYSIS_REVISION = 3;
 export const TYPES = ['kill', 'death', 'assist'];
 export const TRACKS = { kill: 0, assist: 1, death: 2 };
+export const OPENING_GAME_START = 50;
+export const OPENING_GAME_END = 210;
 export const DEFAULT_ROI = { x: 0.867, y: 0.001, width: 0.039, height: 0.022 };
+export const DEFAULT_CLOCK_ROI = { x: 0.945, y: 0.001, width: 0.05, height: 0.025 };
 
 export function number(value, name, min, max) {
   const n = Number(value);
@@ -34,6 +37,50 @@ export function parseKda(text) {
     .replace(/\s/g, '')
     .match(/^(\d{1,2})\/(\d{1,2})\/(\d{1,2})$/);
   return match ? match.slice(1).map(Number) : null;
+}
+
+export function parseGameClock(text) {
+  const match = text
+    .trim()
+    .replace(/\s/g, '')
+    .match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const minutes = Number(match[1]),
+    seconds = Number(match[2]);
+  return minutes < 60 && seconds < 60 ? minutes * 60 + seconds : null;
+}
+
+export function detectOpeningWindow(samples, source) {
+  const valid = samples.filter(
+    (s) =>
+      Number.isFinite(s.time) &&
+      Number.isInteger(s.clockSeconds) &&
+      s.clockSeconds >= 0 &&
+      s.clockSeconds <= 3600 &&
+      s.confidence >= 35,
+  );
+  let best = [];
+  for (const sample of valid) {
+    const offset = sample.time - sample.clockSeconds;
+    const group = valid.filter(
+      (other) => Math.abs(other.time - other.clockSeconds - offset) <= 1.5,
+    );
+    if (group.length > best.length) best = group;
+  }
+  if (
+    best.length < 5 ||
+    Math.max(...best.map((s) => s.time)) - Math.min(...best.map((s) => s.time)) < 20
+  )
+    throw new Error(
+      '인게임 시간 HUD를 안정적으로 읽지 못했습니다. 시계 영역을 확인하고 다시 분석하세요.',
+    );
+  const offsets = best.map((s) => s.time - s.clockSeconds).sort((a, b) => a - b);
+  const offset = offsets[Math.floor(offsets.length / 2)];
+  const start = Math.max(source.in, offset + OPENING_GAME_START);
+  const end = Math.min(source.out, offset + OPENING_GAME_END);
+  if (end <= start)
+    throw new Error('선택한 원본 구간에 인게임 0:50–3:30이 없습니다. 원본 범위를 확인하세요.');
+  return { in: start, out: end, offset, samples: best.length };
 }
 
 // Two consecutive observations confirm a value; keep the FIRST observation's timestamp.
@@ -163,13 +210,27 @@ export function planClips(events, source, settings = {}) {
   const gap = number(settings.gap ?? 15, '동시 판정', 0, 60);
   if (before + after <= 0) throw new Error('앞뒤 보존 시간 중 하나는 0보다 커야 합니다.');
   const types = settings.types ?? TYPES;
-  if (!Array.isArray(types) || !types.length || types.some((t) => !TYPES.includes(t)))
-    throw new Error('이벤트 유형을 하나 이상 선택하세요.');
+  if (!Array.isArray(types) || types.some((t) => !TYPES.includes(t)))
+    throw new Error('이벤트 유형이 올바르지 않습니다.');
   const start = source.in ?? 0,
     end = source.out ?? source.duration;
   const fps = source.fpsNum / source.fpsDen;
+  const opening = source.openingWindow;
+  if (
+    !opening ||
+    !Number.isFinite(opening.in) ||
+    !Number.isFinite(opening.out) ||
+    opening.in < start ||
+    opening.out > end ||
+    opening.out <= opening.in
+  )
+    throw new Error('인게임 시간 분석 결과가 없습니다. 영상을 다시 분석하세요.');
+  const lo = Math.max(0, Math.ceil(start * fps - 1e-7)),
+    hi = Math.floor(end * fps + 1e-7);
+  const openingStart = Math.max(lo, Math.floor(opening.in * fps + 1e-7));
+  const openingEnd = Math.min(hi, Math.ceil(opening.out * fps - 1e-7));
   const selected = normalizeEvents(events, start, end)
-    .filter((e) => e.included && types.includes(e.type))
+    .filter((e) => e.included && types.includes(e.type) && e.time >= openingEnd / fps)
     .sort((a, b) => a.time - b.time);
   const groups = [];
   for (const e of selected) {
@@ -177,23 +238,24 @@ export function planClips(events, source, settings = {}) {
     if (prev && e.time - prev.at(-1).time <= gap) prev.push(e);
     else groups.push([e]);
   }
-  const lo = Math.ceil(start * fps - 1e-7),
-    hi = Math.floor(end * fps + 1e-7);
   const clips = [];
+  if (openingEnd > openingStart)
+    clips.push({ inFrame: openingStart, outFrame: openingEnd, events: [], type: 'opening' });
   for (const group of groups) {
-    const a = Math.max(lo, Math.floor((group[0].time - before) * fps + 1e-7));
+    const a = Math.max(openingEnd, Math.floor((group[0].time - before) * fps + 1e-7));
     const b = Math.min(hi, Math.ceil((group.at(-1).time + after) * fps - 1e-7));
     if (b <= a) continue;
     const prev = clips.at(-1);
-    if (prev && a <= prev.outFrame) {
+    if (prev && prev.type !== 'opening' && a <= prev.outFrame) {
       prev.outFrame = Math.max(b, prev.outFrame);
       prev.events.push(...group);
     } else clips.push({ inFrame: a, outFrame: b, events: [...group] });
   }
   let cursor = 0;
   for (const c of clips) {
-    c.type = [...c.events].sort((a, b) => TRACKS[a.type] - TRACKS[b.type])[0].type;
-    c.track = TRACKS[c.type];
+    if (c.type !== 'opening')
+      c.type = [...c.events].sort((a, b) => TRACKS[a.type] - TRACKS[b.type])[0].type;
+    c.track = c.type === 'opening' ? 0 : TRACKS[c.type];
     c.eventIds = c.events.map((e) => e.id);
     delete c.events;
     c.outputInFrame = cursor;
@@ -201,7 +263,7 @@ export function planClips(events, source, settings = {}) {
     c.outputOutFrame = cursor;
     c.in = c.inFrame / fps;
     c.out = c.outFrame / fps;
-    c.long = c.out - c.in > 120;
+    c.long = c.type !== 'opening' && c.out - c.in > 120;
   }
   return {
     clips,
@@ -212,7 +274,7 @@ export function planClips(events, source, settings = {}) {
   };
 }
 
-export function cacheKey(source, roi, interval) {
+export function cacheKey(source, roi, interval, clockRoi = DEFAULT_CLOCK_ROI) {
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -223,6 +285,7 @@ export function cacheKey(source, roi, interval) {
         in: source.in,
         out: source.out,
         roi,
+        clockRoi,
         interval,
       }),
     )
@@ -234,8 +297,9 @@ export function trimPlan(plan, overrides, source) {
   let cursor = 0,
     lastOut = -1;
   const clips = plan.clips.map((c) => {
-    const key = c.eventIds.join('|'),
+    const key = c.type === 'opening' ? 'opening' : c.eventIds.join('|'),
       edit = overrides?.[key];
+    if (c.type === 'opening' && edit) throw new Error('인게임 0:50–3:30 클립은 자를 수 없습니다.');
     let start = c.inFrame,
       end = c.outFrame;
     if (edit) {

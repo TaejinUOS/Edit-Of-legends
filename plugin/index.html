@@ -35,17 +35,34 @@
         <div class="setting-fieldset clip-timing" role="group" aria-labelledby="clip-timing-title">
           <div id="clip-timing-title" class="setting-legend">클립 시간 설정</div>
           <div class="field-grid three timing-grid">
-            <label>사건 이전 <small>초</small><input id="before" type="number" value="11" min="0" max="120" /></label>
-            <label>사건 이후 <small>초</small><input id="after" type="number" value="7" min="0" max="120" /></label>
-            <label>겹치는 사건 <small>초</small><input id="gap" type="number" value="15" min="0" max="60" /></label>
+            <label
+              >사건 이전 <small>초</small
+              ><input id="before" type="number" value="11" min="0" max="120"
+            /></label>
+            <label
+              >사건 이후 <small>초</small
+              ><input id="after" type="number" value="7" min="0" max="120"
+            /></label>
+            <label
+              >겹치는 사건 <small>초</small
+              ><input id="gap" type="number" value="15" min="0" max="60"
+            /></label>
           </div>
         </div>
         <div class="setting-fieldset event-types" role="group" aria-labelledby="event-types-title">
           <div id="event-types-title" class="setting-legend">포함할 이벤트</div>
           <div class="event-type-grid">
-            <label><input id="kill" type="checkbox" checked /><span class="track v1">V1</span> 킬</label>
-            <label><input id="death" type="checkbox" checked /><span class="track v3">V3</span> 데스</label>
-            <label><input id="assist" type="checkbox" checked /><span class="track v2">V2</span> 어시</label>
+            <label
+              ><input id="kill" type="checkbox" checked /><span class="track v1">V1</span> 킬</label
+            >
+            <label
+              ><input id="death" type="checkbox" checked /><span class="track v3">V3</span>
+              데스</label
+            >
+            <label
+              ><input id="assist" type="checkbox" checked /><span class="track v2">V2</span>
+              어시</label
+            >
           </div>
         </div>
         <div class="action-row">
@@ -68,7 +85,9 @@
           <select id="jobs" aria-label="완료된 분석">
             <option value="">완료된 작업 없음</option>
           </select>
-          <button id="refresh" class="secondary icon-button" title="새로고침" aria-label="새로고침">↻</button>
+          <button id="refresh" class="secondary icon-button" title="새로고침" aria-label="새로고침">
+            ↻
+          </button>
           <button id="load-job" class="secondary small">불러오기</button>
         </div>
         <p id="summary" class="summary">분석 결과를 불러오면 이벤트가 여기에 표시됩니다.</p>
@@ -81,7 +100,12 @@
       </p>
 
       <section class="settings-card" aria-label="기타 설정">
-        <button id="settings-toggle" class="settings-toggle" aria-expanded="false" aria-controls="advanced-settings">
+        <button
+          id="settings-toggle"
+          class="settings-toggle"
+          aria-expanded="false"
+          aria-controls="advanced-settings"
+        >
           <span>기타 설정</span><span id="settings-arrow" aria-hidden="true">▸</span>
         </button>
         <div id="advanced-settings" class="advanced-settings hidden">
@@ -104,15 +128,53 @@
           </div>
           <div class="setting-block hud-block">
             <div class="setting-heading">
-              <strong>HUD 영역 <small>화면 비율 %</small></strong>
+              <strong>K/D/A HUD 영역 <small>화면 비율 %</small></strong>
               <button id="review" class="text-button">검토 화면 열기 ↗</button>
             </div>
             <div class="field-grid four roi">
-              <label>X<input id="x" value="86.7" type="number" min="0" max="100" step="0.1" /></label>
-              <label>Y<input id="y" value="0.1" type="number" min="0" max="100" step="0.1" /></label>
-              <label>너비<input id="width" value="3.9" type="number" min="0.1" max="100" step="0.1" /></label>
-              <label>높이<input id="height" value="2.2" type="number" min="0.1" max="100" step="0.1" /></label>
+              <label
+                >X<input id="x" value="86.7" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >Y<input id="y" value="0.1" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >너비<input id="width" value="3.9" type="number" min="0.1" max="100" step="0.1"
+              /></label>
+              <label
+                >높이<input id="height" value="2.2" type="number" min="0.1" max="100" step="0.1"
+              /></label>
             </div>
+          </div>
+          <div class="setting-block hud-block">
+            <div class="setting-heading">
+              <strong>인게임 시계 영역 <small>화면 비율 %</small></strong>
+              <button id="clock-test" class="text-button">시계 판독 확인</button>
+            </div>
+            <div class="field-grid four roi">
+              <label
+                >X<input id="clock-x" value="94.5" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >Y<input id="clock-y" value="0.1" type="number" min="0" max="100" step="0.1"
+              /></label>
+              <label
+                >너비<input id="clock-width" value="5" type="number" min="0.1" max="100" step="0.1"
+              /></label>
+              <label
+                >높이<input
+                  id="clock-height"
+                  value="2.5"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+              /></label>
+            </div>
+            <label
+              >확인할 영상 시각 <small>초</small
+              ><input id="clock-time" type="number" value="90" min="0" step="0.5"
+            /></label>
           </div>
         </div>
       </section>

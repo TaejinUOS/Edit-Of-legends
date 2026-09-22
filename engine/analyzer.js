@@ -3,7 +3,15 @@ import os from 'node:os';
 import sharp from 'sharp';
 import { createHash } from 'node:crypto';
 import { createWorker, createScheduler, PSM } from 'tesseract.js';
-import { parseKda, detectEvents, number, roiPixels } from './core.js';
+import {
+  parseKda,
+  parseGameClock,
+  detectEvents,
+  detectOpeningWindow,
+  number,
+  roiPixels,
+  DEFAULT_CLOCK_ROI,
+} from './core.js';
 import { sampleFrames, verifyCfr } from './media.js';
 import { glyphImages } from './ocr-image.js';
 import { threadCandidates, fastestThreads, memoizeOcr } from './performance.js';
@@ -31,7 +39,7 @@ export async function ocrPool(count = 1) {
       // Numeric PSM is intentional: string '10' in this WASM build drops isolated zeroes.
       await w.setParameters({
         tessedit_pageseg_mode: Number(PSM.SINGLE_CHAR),
-        tessedit_char_whitelist: '0123456789/',
+        tessedit_char_whitelist: '0123456789/:',
         user_defined_dpi: '70',
       });
     }
@@ -50,6 +58,37 @@ export async function readKda(pool, input, rawInfo) {
     .update(input)
     .digest('hex');
   return memoizeOcr(hudCaches.get(pool), key, () => recognizeKda(pool, input, rawInfo));
+}
+
+export async function readGameClock(pool, input, rawInfo) {
+  if (!hudCaches.has(pool)) resetCaches(pool);
+  const key = createHash('sha256')
+    .update(rawInfo ? `clock:raw:${rawInfo.width}:${rawInfo.height}:` : 'clock:encoded:')
+    .update(input)
+    .digest('hex');
+  return memoizeOcr(hudCaches.get(pool), key, () => recognizeGameClock(pool, input, rawInfo));
+}
+
+async function recognizeGameClock(pool, input, rawInfo) {
+  const image = sharp(
+    input,
+    rawInfo ? { raw: { width: rawInfo.width, height: rawInfo.height, channels: 1 } } : undefined,
+  );
+  const width = rawInfo?.width ?? (await image.metadata()).width;
+  const base = image
+    .resize(width * 4)
+    .grayscale()
+    .normalize();
+  for (const candidate of [base.clone().negate(), base]) {
+    const png = await candidate.png().toBuffer();
+    const row = (
+      await pool.addJob('recognize', png, { tessedit_pageseg_mode: Number(PSM.SINGLE_LINE) })
+    ).data;
+    const clockSeconds = parseGameClock(row.text);
+    if (clockSeconds !== null && row.confidence >= 35)
+      return { text: row.text.trim(), clockSeconds, confidence: row.confidence };
+  }
+  return { text: '', clockSeconds: null, confidence: 0 };
 }
 
 async function recognizeKda(pool, input, rawInfo) {
@@ -92,6 +131,8 @@ async function recognizeKda(pool, input, rawInfo) {
 export async function analyze(source, options, signal, onProgress = () => {}) {
   const interval = number(options.interval ?? 0.5, '분석 간격', 0.25, 2);
   roiPixels(options.roi, source.width, source.height);
+  const clockRoi = options.clockRoi ?? DEFAULT_CLOCK_ROI;
+  roiPixels(clockRoi, source.width, source.height);
   const available = os.availableParallelism();
   const workers =
     options.workers === 'auto' || !options.workers
@@ -158,6 +199,37 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       decoderThreads = fastestThreads(threadTrials);
       resetCaches(pool);
     }
+    const clockSamples = [];
+    onProgress({ stage: '인게임 시간 분석', progress: 0, workers, decoderThreads });
+    const clockSource = {
+      ...source,
+      in: Math.max(0, source.in - 30),
+      out: Math.min(source.duration ?? source.out, source.in + 900),
+    };
+    for await (const f of sampleFrames(clockSource, clockRoi, 2, signal, decoderThreads)) {
+      const value = await readGameClock(pool, f.raw, f);
+      clockSamples.push({ time: f.time, ...value });
+      if (clockSamples.length % 10 === 0)
+        onProgress({
+          stage: '인게임 시간 분석',
+          progress: Math.min(
+            0.1,
+            (0.1 * (f.time - clockSource.in)) / (clockSource.out - clockSource.in),
+          ),
+          workers,
+          decoderThreads,
+        });
+      if (value.clockSeconds >= 220) {
+        try {
+          detectOpeningWindow(clockSamples, source);
+          break;
+        } catch (error) {
+          if (error.message.includes('선택한 원본 구간')) throw error;
+          // Keep sampling until enough consistent clock readings are available.
+        }
+      }
+    }
+    const openingWindow = detectOpeningWindow(clockSamples, source);
     const flush = async () => {
       const completed = await Promise.allSettled(batch.splice(0));
       const failed = completed.find((entry) => entry.status === 'rejected');
@@ -167,7 +239,7 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       const t = samples.at(-1)?.time ?? source.in;
       onProgress({
         stage: 'K/D/A 분석',
-        progress: Math.min(0.99, (t - source.in) / (source.out - source.in)),
+        progress: Math.min(0.99, 0.1 + (0.89 * (t - source.in)) / (source.out - source.in)),
         samples: samples.length,
         workers,
         decoderThreads,
@@ -186,7 +258,16 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       throw new Error(
         'K/D/A를 읽지 못했습니다. 숫자 세 개와 / 구분자만 포함하도록 HUD 영역을 조정하세요.',
       );
-    return { ...result, samples, workers, interval, decoderThreads, threadTrials };
+    return {
+      ...result,
+      openingWindow,
+      clockSamples,
+      samples,
+      workers,
+      interval,
+      decoderThreads,
+      threadTrials,
+    };
   } finally {
     await Promise.allSettled(batch);
     await pool.terminate();

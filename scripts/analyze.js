@@ -1,6 +1,6 @@
 import { probe } from '../engine/media.js';
 import { analyze } from '../engine/analyzer.js';
-import { DEFAULT_ROI, planClips } from '../engine/core.js';
+import { DEFAULT_ROI, DEFAULT_CLOCK_ROI, planClips } from '../engine/core.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { cacheKey } from '../engine/core.js';
@@ -19,7 +19,7 @@ const startedAt = Date.now();
 let last = 0;
 const result = await analyze(
   source,
-  { roi: DEFAULT_ROI, workers: 'auto', interval: 0.5 },
+  { roi: DEFAULT_ROI, clockRoi: DEFAULT_CLOCK_ROI, workers: 'auto', interval: 0.5 },
   controller.signal,
   (p) => {
     if (Date.now() - last > 5000 || p.progress === 0) {
@@ -28,16 +28,16 @@ const result = await analyze(
     }
   },
 );
-const plan = planClips(result.events, source);
+const plan = planClips(result.events, { ...source, openingWindow: result.openingWindow });
 await mkdir('.eol', { recursive: true });
 await writeFile('.eol/analysis-report.json', JSON.stringify({ source, result, plan }, null, 2));
 const id = randomUUID(),
-  options = { roi: DEFAULT_ROI, workers: 'auto', interval: 0.5 };
+  options = { roi: DEFAULT_ROI, clockRoi: DEFAULT_CLOCK_ROI, workers: 'auto', interval: 0.5 };
 source.id = randomUUID();
 await mkdir('.eol/jobs', { recursive: true });
 await mkdir('.eol/cache', { recursive: true });
 await writeFile(
-  `.eol/cache/${cacheKey(source, options.roi, options.interval)}.json`,
+  `.eol/cache/${cacheKey(source, options.roi, options.interval, options.clockRoi)}.json`,
   JSON.stringify(result),
 );
 await writeFile(

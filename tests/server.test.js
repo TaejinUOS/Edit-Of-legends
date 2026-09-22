@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -51,10 +51,22 @@ test('loopback API enforces auth and host; supports UXP CORS; validates before m
     assert.equal(badHost, 403);
     assert.equal((await request('/api/jobs')).status, 200);
     assert.equal((await fetch(base + '/engine/server.js')).status, 404);
+    const mediaPath = path.join(dir, 'game.mp4');
+    await writeFile(mediaPath, 'test media');
+    const mediaInfo = await stat(mediaPath);
     const job = {
       id: 'test-job',
       status: 'done',
-      source: { in: 0, out: 200, fpsNum: 60, fpsDen: 1 },
+      source: {
+        path: mediaPath,
+        size: mediaInfo.size,
+        modified: mediaInfo.mtimeMs,
+        in: 0,
+        out: 200,
+        fpsNum: 60,
+        fpsDen: 1,
+      },
+      result: { openingWindow: { in: 50, out: 190 } },
       events: [{ id: '1', type: 'kill', time: 50, amount: 1, included: true }],
     };
     app.jobs.set(job.id, job);
@@ -80,6 +92,17 @@ test('loopback API enforces auth and host; supports UXP CORS; validates before m
     assert.equal(good.status, 200);
     const saved = JSON.parse(await readFile(path.join(dir, 'jobs', 'test-job.json')));
     assert.equal(saved.events[0].type, 'assist');
+    const planned = await request('/api/jobs/test-job/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: { types: [] } }),
+    });
+    assert.equal(planned.status, 200);
+    const plan = await planned.json();
+    assert.deepEqual(
+      plan.clips.map((clip) => [clip.type, clip.in, clip.out]),
+      [['opening', 50, 190]],
+    );
     await atomicJson(path.join(dir, 'atomic.json'), { hello: '한글' });
     assert.equal(JSON.parse(await readFile(path.join(dir, 'atomic.json'))).hello, '한글');
   } finally {

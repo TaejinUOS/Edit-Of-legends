@@ -165,7 +165,7 @@ function adapter(ppro) {
       );
     const uid = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
     const prefix = 'EOL_' + uid;
-    const eventLabels = { kill: '킬', assist: '어시', death: '데스' };
+    const eventLabels = { opening: '오프닝', kill: '킬', assist: '어시', death: '데스' };
     const names = plan.clips.map(
       (clip, index) =>
         `EOL_${index + 1}번클립(${eventLabels[clip.type] ?? clip.type})_${uid}`,
@@ -361,7 +361,7 @@ function adapter(ppro) {
       const sequenceItem = await sequence.getProjectItem();
       transaction(project, 'EditOfLegends: 생성 완료', () => [
         ...tracksToRename.map(({ track, index }) =>
-          track.createSetNameAction(['EOL · 킬', 'EOL · 어시', 'EOL · 데스'][index]),
+          track.createSetNameAction(['EOL · 오프닝/킬', 'EOL · 어시', 'EOL · 데스'][index]),
         ),
         sequenceItem.createSetNameAction(name),
       ]);
