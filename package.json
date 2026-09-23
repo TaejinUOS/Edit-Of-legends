@@ -12,6 +12,9 @@
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check.js",
     "analyze": "node scripts/analyze.js",
+    "profile": "node scripts/profile-analysis.js",
+    "profile:decode": "node scripts/profile-decode.js",
+    "profile:filter": "node scripts/profile-filter-order.js",
     "package:plugin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-plugin.ps1",
     "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "package:release": "npm run check && npm test && npm run package:windows"

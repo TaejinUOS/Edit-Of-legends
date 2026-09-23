@@ -114,6 +114,8 @@ export async function probe(file, range = {}) {
     out: end,
     width: video.width,
     height: video.height,
+    pixelFormat: video.pix_fmt,
+    colorRange: video.color_range,
     fpsNum,
     fpsDen,
     audio,
@@ -209,6 +211,15 @@ export async function* sampleFrames(source, roi, interval, signal, threads = 4) 
   const height = Math.max(...regions.map((area) => area.height));
   const bytes = width * height;
   const fpsFilter = `fps=${1 / interval}:start_time=0:round=up`;
+  // Only use the byte-exact luma conversion for verified 8-bit limited-range
+  // YUV420 input. Unknown/older source metadata and other formats keep the
+  // existing FFmpeg conversion. Single-region sampling also keeps its crop
+  // semantics; the expensive full-frame conversion is in the multi-ROI path.
+  const fastLuma = source.pixelFormat === 'yuv420p' && source.colorRange === 'tv';
+  const cropFilter = (r) =>
+    fastLuma
+      ? `crop=${r.width}:${r.height}:${r.x}:${r.y}:exact=1,extractplanes=y,lut=y='(val-16)*255/219+0.5'`
+      : `crop=${r.width}:${r.height}:${r.x}:${r.y}`;
   const filters =
     regions.length === 1
       ? [
@@ -219,12 +230,9 @@ export async function* sampleFrames(source, roi, interval, signal, threads = 4) 
           '-filter_complex_threads',
           '1',
           '-filter_complex',
-          `[0:v]${fpsFilter},format=gray,split=${regions.length}${regions.map((_, i) => `[s${i}]`).join('')};` +
+          `[0:v]${fpsFilter},${fastLuma ? '' : 'format=gray,'}split=${regions.length}${regions.map((_, i) => `[s${i}]`).join('')};` +
             regions
-              .map(
-                (r, i) =>
-                  `[s${i}]crop=${r.width}:${r.height}:${r.x}:${r.y},pad=${r.width}:${height}:0:0[c${i}]`,
-              )
+              .map((r, i) => `[s${i}]${cropFilter(r)},pad=${r.width}:${height}:0:0[c${i}]`)
               .join(';') +
             `;${regions.map((_, i) => `[c${i}]`).join('')}hstack=inputs=${regions.length}[hud]`,
           '-map',

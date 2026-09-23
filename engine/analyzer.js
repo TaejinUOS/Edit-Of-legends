@@ -7,7 +7,6 @@ import {
   parseKda,
   parseGameClock,
   detectEvents,
-  detectOpeningWindow,
   number,
   roiPixels,
   DEFAULT_CLOCK_ROI,
@@ -15,8 +14,14 @@ import {
 } from './core.js';
 import { readFlash, detectFlashEvents } from './flash.js';
 import { sampleFrames, verifyCfr } from './media.js';
+import { createClockSampler } from './clock-sampling.js';
 import { glyphImages } from './ocr-image.js';
 import { threadCandidates, fastestThreads, memoizeOcr } from './performance.js';
+import {
+  decoderProfileLocation,
+  readDecoderProfile,
+  writeDecoderProfile,
+} from './decoder-cache.js';
 
 const require = createRequire(import.meta.url);
 const language = require('@tesseract.js-data/eng');
@@ -130,7 +135,7 @@ async function recognizeKda(pool, input, rawInfo) {
   };
 }
 
-export async function analyze(source, options, signal, onProgress = () => {}) {
+export async function analyze(source, options, signal, onProgress = () => {}, { stateDir } = {}) {
   const interval = number(options.interval ?? 0.5, '분석 간격', 0.25, 2);
   roiPixels(options.roi, source.width, source.height);
   const clockRoi = options.clockRoi ?? DEFAULT_CLOCK_ROI;
@@ -151,8 +156,23 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
   let decoderThreads = candidates[0];
   const samples = [],
     batch = [];
+  let decoderThreadsCached = false;
   try {
-    if (candidates.length > 1) {
+    const profileLocation =
+      candidates.length > 1
+        ? await decoderProfileLocation(
+            source,
+            { available, workers, interval, roi: options.roi, flash },
+            stateDir,
+          )
+        : null;
+    const savedThreads = await readDecoderProfile(profileLocation, candidates);
+    signal?.throwIfAborted();
+    if (savedThreads !== null) {
+      decoderThreads = savedThreads;
+      decoderThreadsCached = true;
+      onProgress({ stage: '디코더 설정 재사용', progress: 0, workers, decoderThreads });
+    } else if (candidates.length > 1) {
       const preview = { ...source, out: Math.min(source.out, source.in + 8) };
       // Warm up WASM before timing; each trial starts with equally empty caches.
       for await (const f of sampleFrames(
@@ -202,40 +222,20 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       }
       decoderThreads = fastestThreads(threadTrials);
       resetCaches(pool);
+      signal?.throwIfAborted();
+      await writeDecoderProfile(profileLocation, decoderThreads);
     }
-    const clockSamples = [];
-    onProgress({ stage: '인게임 시간 분석', progress: 0, workers, decoderThreads });
-    const clockSource = {
-      ...source,
-      in: Math.max(0, source.in - 30),
-      out: Math.min(source.duration ?? source.out, source.in + 900),
-    };
-    for await (const f of sampleFrames(clockSource, clockRoi, 2, signal, decoderThreads)) {
-      const value = await readGameClock(pool, f.raw, f);
-      clockSamples.push({ time: f.time, ...value });
-      if (clockSamples.length % 10 === 0)
-        onProgress({
-          stage: '인게임 시간 분석',
-          progress: Math.min(
-            0.1,
-            (0.1 * (f.time - clockSource.in)) / (clockSource.out - clockSource.in),
-          ),
-          workers,
-          decoderThreads,
-        });
-      // A stable source/game offset locates both boundaries; decoding all the
-      // way past 3:30 is unnecessary, especially for a short selected range.
-      if (value.clockSeconds !== null) {
-        try {
-          detectOpeningWindow(clockSamples, source);
-          break;
-        } catch (error) {
-          if (error.message.includes('선택한 원본 구간')) throw error;
-          // Keep sampling until enough consistent clock readings are available.
-        }
-      }
-    }
-    const openingWindow = detectOpeningWindow(clockSamples, source);
+    const clockSampler = createClockSampler(
+      source,
+      clockRoi,
+      interval,
+      (raw, info) => readGameClock(pool, raw, info),
+      signal,
+      decoderThreads,
+      (count) => {
+        if (count % 10 === 0) onProgress({ stage: '인게임 시간 확인', workers, decoderThreads });
+      },
+    );
     const flush = async () => {
       const completed = await Promise.allSettled(batch.splice(0));
       const failed = completed.find((entry) => entry.status === 'rejected');
@@ -252,7 +252,7 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       });
     };
     const regions = flash.enabled ? [options.roi, flash.roi] : [options.roi];
-    for await (const f of sampleFrames(source, regions, interval, signal, decoderThreads)) {
+    for await (const f of clockSampler.frames(regions)) {
       const [kdaFrame, flashFrame] = f.regions;
       const pending = Promise.all([
         readKda(pool, kdaFrame.raw, kdaFrame),
@@ -264,6 +264,7 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
     }
     if (batch.length) await flush();
     if (signal?.aborted) throw new Error('분석을 취소했습니다.');
+    const { openingWindow, clockSamples } = clockSampler;
     const result = detectEvents(samples, interval);
     const flashSamples = flash.enabled ? samples.map((s) => ({ time: s.time, ...s.flash })) : [];
     result.events.push(...detectFlashEvents(flashSamples, interval));
@@ -286,6 +287,7 @@ export async function analyze(source, options, signal, onProgress = () => {}) {
       workers,
       interval,
       decoderThreads,
+      decoderThreadsCached,
       threadTrials,
     };
   } finally {

@@ -101,7 +101,9 @@ export async function createApp({
         job.result = cached;
         job.cached = true;
       } else {
-        job.result = await analyze(job.source, job.options, signal, (p) => Object.assign(job, p));
+        job.result = await analyze(job.source, job.options, signal, (p) => Object.assign(job, p), {
+          stateDir: STORE,
+        });
         if (!signal.aborted) await atomicJson(cacheFile, job.result);
       }
       if (signal.aborted) throw new Error('분석을 취소했습니다.');
