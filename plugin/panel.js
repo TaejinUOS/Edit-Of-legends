@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const CONNECTION_FILE_KEY = 'editoflegends.connection-file-token';
 const ENGINE_TOKEN_KEY = 'editoflegends.engine-token';
 const ENGINE_URL = 'http://localhost:4317';
-const ENGINE_VERSION = '0.2.2';
+const ENGINE_VERSION = '0.2.3';
 const ENGINE_START_URL = 'editoflegends://start';
 
 let connection = null;
@@ -342,11 +342,10 @@ function applySourceKdaDefault() {
 
 function sourceFlashRoi() {
   const slot = $('flash-slot').value;
-  const small = source?.width === 1920 && source?.height === 1080;
   return (
     source?.defaultFlashRois?.[slot] ?? {
-      x: slot === 'D' ? (small ? 0.509 : 0.516) : small ? 0.528 : 0.535,
-      y: small ? 0.915 : 0.916,
+      x: slot === 'D' ? 0.516 : 0.535,
+      y: 0.916,
       width: 0.015,
       height: 0.026,
     }

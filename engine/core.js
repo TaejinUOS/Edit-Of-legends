@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const VERSION = '0.2.2';
+export const VERSION = '0.2.3';
 // Bump only when OCR, sampling, event detection, or cached result compatibility changes.
 // App releases and performance-only changes must not invalidate analysis results.
 export const ANALYSIS_REVISION = 5;
@@ -16,8 +16,8 @@ export const FLASH_ROIS_1080 = {
   F: { x: 0.528, y: 0.915, width: 0.015, height: 0.026 },
 };
 
-export function defaultFlashRois(source) {
-  return source?.width === 1920 && source?.height === 1080 ? FLASH_ROIS_1080 : FLASH_ROIS;
+export function defaultFlashRois() {
+  return FLASH_ROIS;
 }
 
 export function flashOptions(value = {}, source) {
@@ -27,12 +27,12 @@ export function flashOptions(value = {}, source) {
   const slot = value.slot ?? 'F';
   if (typeof enabled !== 'boolean' || !['D', 'F'].includes(slot))
     throw new Error('점멸 슬롯은 D 또는 F여야 합니다.');
-  const legacyDefault =
+  const shiftedPreset =
     value.roi &&
-    Object.keys(FLASH_ROIS[slot]).every(
-      (key) => Math.abs(value.roi[key] - FLASH_ROIS[slot][key]) < 1e-8,
+    Object.keys(FLASH_ROIS_1080[slot]).every(
+      (key) => Math.abs(value.roi[key] - FLASH_ROIS_1080[slot][key]) < 1e-8,
     );
-  const roi = !value.roi || legacyDefault ? defaultFlashRois(source)[slot] : value.roi;
+  const roi = !value.roi || shiftedPreset ? defaultFlashRois(source)[slot] : value.roi;
   roiPixels(roi, 2560, 1440);
   return { enabled, slot, roi };
 }

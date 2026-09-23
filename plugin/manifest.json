@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.taejinuos.editoflegends",
   "name": "EditOfLegends",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "main": "index.html",
   "host": { "app": "premierepro", "minVersion": "26.3.0" },
   "requiredPermissions": {
