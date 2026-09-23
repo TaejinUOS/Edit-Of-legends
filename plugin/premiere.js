@@ -23,7 +23,7 @@ function adapter(ppro) {
     }
     return result;
   }
-  async function selectedSource() {
+  async function selectedSources() {
     const project = await ppro.Project.getActiveProject();
     if (!project) throw Error('Premiere 프로젝트를 여세요.');
     const sequence = await project.getActiveSequence();
@@ -32,29 +32,37 @@ function adapter(ppro) {
     for (let i = 0; i < (await sequence.getVideoTrackCount()); i++) {
       const track = await sequence.getVideoTrack(i);
       for (const item of await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false))
-        if (await item.getIsSelected()) videos.push(item);
+        if (await item.getIsSelected())
+          videos.push({ item, track: i, start: (await item.getStartTime()).seconds });
     }
-    if (videos.length !== 1)
-      throw Error(
-        '타임라인에서 영상 클립 하나를 선택하세요. 연결된 오디오는 함께 선택해도 됩니다.',
-      );
-    const item = videos[0];
-    if (Math.abs((await item.getSpeed()) - 1) > 0.00001 || (await item.isSpeedReversed()))
-      throw Error('속도 변경·역재생 클립은 지원하지 않습니다.');
-    const clip = ppro.ClipProjectItem.cast(await item.getProjectItem());
-    if (
-      !clip ||
-      (await clip.isSequence()) ||
-      (await clip.isMulticamClip()) ||
-      (await clip.isMergedClip()) ||
-      (await clip.isOffline())
-    )
-      throw Error('온라인 상태의 일반 녹화 클립을 선택하세요.');
-    return {
-      path: await clip.getMediaFilePath(),
-      in: (await item.getInPoint()).seconds,
-      out: (await item.getOutPoint()).seconds,
-    };
+    if (!videos.length)
+      throw Error('타임라인에서 영상 클립을 하나 이상 선택하세요. 연결된 오디오는 함께 선택해도 됩니다.');
+    videos.sort((a, b) => a.start - b.start || a.track - b.track);
+    const sources = [];
+    for (const { item } of videos) {
+      if (Math.abs((await item.getSpeed()) - 1) > 0.00001 || (await item.isSpeedReversed()))
+        throw Error('속도 변경·역재생 클립은 지원하지 않습니다.');
+      const clip = ppro.ClipProjectItem.cast(await item.getProjectItem());
+      if (
+        !clip ||
+        (await clip.isSequence()) ||
+        (await clip.isMulticamClip()) ||
+        (await clip.isMergedClip()) ||
+        (await clip.isOffline())
+      )
+        throw Error('온라인 상태의 일반 녹화 클립을 선택하세요.');
+      sources.push({
+        path: await clip.getMediaFilePath(),
+        in: (await item.getInPoint()).seconds,
+        out: (await item.getOutPoint()).seconds,
+      });
+    }
+    return sources;
+  }
+  async function selectedSource() {
+    const sources = await selectedSources();
+    if (sources.length !== 1) throw Error('영상 클립 하나를 선택하세요.');
+    return sources[0];
   }
   function validatePlan(plan) {
     if (
@@ -65,27 +73,66 @@ function adapter(ppro) {
       !plan.clips.length
     )
       throw Error('유효한 편집 계획이 필요합니다.');
-    let cursor = 0,
-      last = -1;
+    const sources = plan.sources ?? [plan.source];
+    if (!Array.isArray(sources) || !sources.length || sources.some((source) => !source?.path))
+      throw Error('편집할 원본 목록이 올바르지 않습니다.');
+    let cursor = 0;
+    const last = sources.map(() => -1);
     for (const c of plan.clips) {
+      const sourceIndex = c.sourceIndex ?? 0;
+      const selectedSource = sources[sourceIndex];
       if (
+        !Number.isInteger(sourceIndex) ||
+        !selectedSource ||
         ![c.inFrame, c.outFrame, c.outputInFrame, c.outputOutFrame, c.track].every(
           Number.isInteger,
         ) ||
         c.inFrame < 0 ||
         c.outFrame <= c.inFrame ||
-        c.inFrame < last ||
+        c.inFrame < last[sourceIndex] ||
         c.outputInFrame !== cursor ||
         c.outputOutFrame - c.outputInFrame !== c.outFrame - c.inFrame ||
         ![0, 1, 2, 3].includes(c.track) ||
-        c.inFrame < Math.ceil(plan.source.in * plan.fpsNum - 1e-7) ||
-        c.outFrame > Math.floor(plan.source.out * plan.fpsNum + 1e-7)
+        c.inFrame < Math.ceil(selectedSource.in * plan.fpsNum - 1e-7) ||
+        c.outFrame > Math.floor(selectedSource.out * plan.fpsNum + 1e-7)
       )
         throw Error('컷 계획의 범위 또는 시간축이 올바르지 않습니다.');
       cursor = c.outputOutFrame;
-      last = c.outFrame;
+      last[sourceIndex] = c.outFrame;
     }
     if (cursor !== plan.frames) throw Error('편집 계획 길이가 일치하지 않습니다.');
+  }
+  function combinePlans(plans) {
+    if (!Array.isArray(plans) || !plans.length) throw Error('합칠 클립이 없습니다.');
+    for (const plan of plans) validatePlan(plan);
+    const first = plans[0];
+    const audioSignature = (source) => JSON.stringify(source.audio.map((track) => track.channels));
+    if (plans.some((plan) =>
+      plan.fpsNum !== first.fpsNum ||
+      plan.fpsDen !== first.fpsDen ||
+      audioSignature(plan.source) !== audioSignature(first.source),
+    ))
+      throw Error('하나의 시퀀스로 합치려면 모든 클립의 FPS와 오디오 채널 구성이 같아야 합니다.');
+    let cursor = 0;
+    const clips = [];
+    for (const [sourceIndex, plan] of plans.entries()) {
+      for (const clip of plan.clips)
+        clips.push({
+          ...clip,
+          sourceIndex,
+          outputInFrame: clip.outputInFrame + cursor,
+          outputOutFrame: clip.outputOutFrame + cursor,
+        });
+      cursor += plan.frames;
+    }
+    return {
+      source: first.source,
+      sources: plans.map((plan) => plan.source),
+      clips,
+      frames: cursor,
+      fpsNum: first.fpsNum,
+      fpsDen: first.fpsDen,
+    };
   }
   async function findSource(root, mediaPath, excludedNames = []) {
     for (const item of await descendants(root)) {
@@ -96,6 +143,7 @@ function adapter(ppro) {
       if (
         clip &&
         !excludedNames.includes(item.name) &&
+        !/^EOL_\d+번클립\(/.test(item.name) &&
         !(await clip.isSequence()) &&
         canonical(await clip.getMediaFilePath()) === canonical(mediaPath)
       )
@@ -110,7 +158,7 @@ function adapter(ppro) {
       null
     );
   }
-  async function cleanupArtifacts(projectGuid, artifactNames, sequenceGuid, previousSequenceGuid) {
+  async function cleanupArtifacts(projectGuid, artifactNames, binName, sequenceGuid, previousSequenceGuid) {
     const failures = [];
     let project = ppro.Project.getProject(projectGuid);
     if (sequenceGuid) {
@@ -148,6 +196,21 @@ function adapter(ppro) {
     } catch {
       failures.push('EOL 서브클립');
     }
+    if (binName) {
+      try {
+        project = ppro.Project.getProject(projectGuid);
+        const root = await project.getRootItem();
+        const bin = (await root.getItems()).find((item) => item.name === binName);
+        if (bin) {
+          const folder = ppro.FolderItem.cast(bin);
+          if (!folder || (await folder.getItems()).length)
+            throw Error('생성된 클립 폴더가 비어 있지 않습니다.');
+          transaction(project, 'EditOfLegends: 빈 폴더 정리', () => [root.createRemoveItemAction(bin)]);
+        }
+      } catch {
+        failures.push('EOL 클립 폴더');
+      }
+    }
     return failures;
   }
   async function generate(plan, { onProgress = () => {}, isCancelled = () => false } = {}) {
@@ -157,9 +220,12 @@ function adapter(ppro) {
     const projectGuid = project.guid;
     const previousSequenceGuid = (await project.getActiveSequence())?.guid ?? null;
     let root = await project.getRootItem();
-    let original = await findSource(root, plan.source.path);
-    if (!original) throw Error('분석한 원본 파일을 현재 Premiere 프로젝트에 먼저 가져오세요.');
-    if (await original.isOffline()) throw Error('원본 파일이 오프라인 상태입니다.');
+    const sources = plan.sources ?? [plan.source];
+    let originals = await Promise.all(sources.map((source) => findSource(root, source.path)));
+    if (originals.some((item) => !item))
+      throw Error('분석한 원본 파일을 현재 Premiere 프로젝트에 먼저 가져오세요.');
+    if ((await Promise.all(originals.map((item) => item.isOffline()))).some(Boolean))
+      throw Error('원본 파일이 오프라인 상태입니다.');
     const time = (f) =>
       ppro.TickTime.createWithFrameAndFrameRate(
         f,
@@ -167,6 +233,7 @@ function adapter(ppro) {
       );
     const uid = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
     const prefix = 'EOL_' + uid;
+    const binName = 'EOL_생성된 클립_' + uid;
     const eventLabels = {
       opening: '오프닝',
       kill: '킬',
@@ -183,7 +250,7 @@ function adapter(ppro) {
       onProgress('소스 구간 생성', 0);
       transaction(project, 'EditOfLegends: 컷 소스 생성', () =>
         plan.clips.map((c, i) =>
-          original.createSubClipAction(names[i], time(c.inFrame), time(c.outFrame), false, {
+          originals[c.sourceIndex ?? 0].createSubClipAction(names[i], time(c.inFrame), time(c.outFrame), false, {
             takeVideo: true,
             takeAudio: true,
           }),
@@ -203,13 +270,13 @@ function adapter(ppro) {
         ppro.ClipProjectItem.cast(item);
         return item;
       });
-      original = await findSource(root, plan.source.path, names);
-      if (!original) throw Error('원본 클립을 다시 찾을 수 없습니다.');
+      originals = await Promise.all(sources.map((source) => findSource(root, source.path, names)));
+      if (originals.some((item) => !item)) throw Error('원본 클립을 다시 찾을 수 없습니다.');
       if (isCancelled()) throw Error('시퀀스 생성을 취소했습니다.');
       stage = '새 시퀀스 생성';
       let sequence = await project.createSequenceFromMedia(
         prefix + '_INCOMPLETE',
-        [original],
+        [originals[0]],
         root,
       );
       if (!sequence) throw Error('새 시퀀스를 생성하지 못했습니다.');
@@ -364,7 +431,10 @@ function adapter(ppro) {
       if (audioTracks < plan.source.audio.length)
         throw Error('일부 오디오 트랙이 누락되었습니다. 원본 오디오 채널 매핑을 확인하세요.');
       stage = '이름 지정';
-      const name = 'EOL_하이라이트_' + plan.source.name.replace(/\.[^.]+$/, '') + '_' + uid;
+      const name =
+        'EOL_하이라이트_' +
+        (sources.length > 1 ? '합본' : plan.source.name.replace(/\.[^.]+$/, '')) +
+        '_' + uid;
       const sequenceItem = await sequence.getProjectItem();
       transaction(project, 'EditOfLegends: 생성 완료', () => [
         ...tracksToRename.map(({ track, index }) =>
@@ -374,15 +444,39 @@ function adapter(ppro) {
         ),
         sequenceItem.createSetNameAction(name),
       ]);
+      stage = '생성된 클립 폴더 정리';
+      project = ppro.Project.getProject(projectGuid);
+      root = await project.getRootItem();
+      transaction(project, 'EditOfLegends: 클립 폴더 생성', () => [
+        root.createBinAction(binName, false),
+      ]);
+      project = ppro.Project.getProject(projectGuid);
+      root = await project.getRootItem();
+      const binItem = (await root.getItems()).find((item) => item.name === binName);
+      const bin = binItem && ppro.FolderItem.cast(binItem);
+      if (!bin) throw Error('생성된 클립 폴더를 찾을 수 없습니다.');
+      const generated = (await descendants(root)).filter((item) => names.includes(item.name));
+      if (generated.length !== names.length) throw Error('생성된 클립 일부를 찾을 수 없습니다.');
+      transaction(project, 'EditOfLegends: 클립 폴더로 이동', () =>
+        generated.map((item) => item.getParentBin().createMoveItemAction(item, bin)),
+      );
+      project = ppro.Project.getProject(projectGuid);
+      root = await project.getRootItem();
+      const finalBin = ppro.FolderItem.cast(
+        (await root.getItems()).find((item) => item.name === binName),
+      );
+      if (!finalBin || (await finalBin.getItems()).length !== names.length)
+        throw Error('생성된 클립 폴더의 내용이 일치하지 않습니다.');
       project = ppro.Project.getProject(projectGuid);
       sequence = await project.getActiveSequence();
       await project.openSequence(sequence);
       await project.setActiveSequence(sequence);
-      return { name, clips: actual.length, audioTracks };
+      return { name, clips: actual.length, audioTracks, binName };
     } catch (e) {
       const cleanupFailures = await cleanupArtifacts(
         projectGuid,
         names,
+        binName,
         sequenceGuid,
         previousSequenceGuid,
       );
@@ -394,6 +488,6 @@ function adapter(ppro) {
       );
     }
   }
-  return { selectedSource, generate, validatePlan };
+  return { selectedSource, selectedSources, generate, combinePlans, validatePlan };
 }
 module.exports = { adapter };

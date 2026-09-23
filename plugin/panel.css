@@ -349,7 +349,12 @@ select:focus { border-color: #7e8e37; }
   font-size: 15px;
 }
 
-.summary { margin-bottom: 6px; }
+.summary {
+  margin-bottom: 6px;
+  background: #25252b;
+  color: #f0f0f2;
+  font-size: 11px;
+}
 
 #events {
   max-height: 150px;
@@ -360,21 +365,24 @@ select:focus { border-color: #7e8e37; }
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 5px 3px;
-  border-top: 1px solid #303035;
-  font-size: 10px;
+  margin-bottom: 3px;
+  padding: 6px 7px;
+  border: 1px solid #4b4b53;
+  border-radius: 3px;
+  background: #2b2b31;
+  color: #f5f5f7;
+  font-size: 11px;
 }
 
-.event:first-child { border-top: 0; }
 .event input {
   flex: 0 0 12px;
   width: 12px;
   height: 12px;
   margin: 0;
 }
-.event-copy { flex: 1 1 auto; }
-.event small { flex: 0 0 auto; }
-.event time { color: var(--muted); }
+.event-copy { flex: 1 1 auto; font-weight: 700; }
+.event small { flex: 0 0 auto; color: #d7d7de; font-size: 10px; }
+.event time { color: #d7d7de; }
 
 .message {
   min-height: 28px;

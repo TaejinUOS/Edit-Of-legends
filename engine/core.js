@@ -39,18 +39,18 @@ export function flashOptions(value = {}, source) {
 export const OPENING_GAME_START = 50;
 export const OPENING_GAME_END = 210;
 export const DEFAULT_ROI = { x: 0.867, y: 0.001, width: 0.039, height: 0.022 };
+// The former 1080p preset is retained to migrate jobs created with it.
 export const DEFAULT_ROI_1080 = { ...DEFAULT_ROI, x: 0.86 };
 
-export function defaultKdaRoi(source) {
-  return source.width === 1920 && source.height === 1080 ? DEFAULT_ROI_1080 : DEFAULT_ROI;
+export function defaultKdaRoi() {
+  return DEFAULT_ROI;
 }
 
-export function resolveKdaRoi(source, roi) {
-  // Migrate the old universal preset, including percentages round-tripped by
-  // the panel. Preserve user-defined crop coordinates.
-  const legacyDefault =
-    roi && Object.keys(DEFAULT_ROI).every((key) => Math.abs(roi[key] - DEFAULT_ROI[key]) < 1e-8);
-  return !roi || legacyDefault ? defaultKdaRoi(source) : roi;
+export function resolveKdaRoi(_source, roi) {
+  // Restore jobs created with the shifted 1080p preset. Keep custom crops.
+  const shiftedPreset =
+    roi && Object.keys(DEFAULT_ROI_1080).every((key) => Math.abs(roi[key] - DEFAULT_ROI_1080[key]) < 1e-8);
+  return !roi || shiftedPreset ? DEFAULT_ROI : roi;
 }
 // Exclude the clock icon on the left and the FPS/ping row below the digits.
 export const DEFAULT_CLOCK_ROI = { x: 0.968, y: 0.001, width: 0.025, height: 0.019 };

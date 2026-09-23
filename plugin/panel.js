@@ -10,7 +10,11 @@ const ENGINE_START_URL = 'editoflegends://start';
 
 let connection = null;
 let source = null;
+let sources = [];
 let job = null;
+let batchJobs = [];
+let batchRunning = false;
+let batchCancelled = false;
 let pollTimer = null;
 let cancelGeneration = false;
 let generating = false;
@@ -48,7 +52,7 @@ function clearProgress() {
 }
 
 function isAnalyzing() {
-  return job?.status === 'running';
+  return batchRunning || job?.status === 'running';
 }
 
 function updateControls() {
@@ -74,7 +78,7 @@ function updateControls() {
   $('cancel').disabled = !busy;
   $('refresh').disabled = !connected || busy;
   $('load-job').disabled = !connected || busy || !$('jobs').value;
-  $('generate').disabled = !connected || job?.status !== 'done' || busy;
+  $('generate').disabled = !connected || (job?.status !== 'done' && !batchJobs.length) || busy;
 }
 
 function fail(error) {
@@ -328,7 +332,7 @@ function applySourceKdaDefault() {
     Math.abs(roi.height - 0.022) < 1e-8;
   if (!isPreset) return;
   const preset = source.defaultRoi ?? {
-    x: source.width === 1920 && source.height === 1080 ? 0.86 : 0.867,
+    x: 0.867,
     y: 0.001,
     width: 0.039,
     height: 0.022,
@@ -366,7 +370,13 @@ function applySourceFlashDefault() {
 
 function setSourceInfo(value) {
   $('source-info').classList.toggle('empty', !value);
-  $('source-info').textContent = value || '타임라인에서 영상 클립 하나를 선택하세요.';
+  $('source-info').textContent = value || '타임라인에서 영상 클립을 하나 이상 선택하세요.';
+}
+
+function describeSources(items) {
+  return items.map((item, index) =>
+    `${items.length > 1 ? `${index + 1}. ` : ''}${item.name} · ${item.in.toFixed(2)}–${item.out.toFixed(2)}초 · ${item.width}×${item.height} · ${item.fpsNum / item.fpsDen}fps`,
+  ).join('\n');
 }
 
 async function refreshJobs(preferredId = job?.id) {
@@ -380,7 +390,7 @@ async function refreshJobs(preferredId = job?.id) {
   for (const item of completed) {
     const option = document.createElement('option');
     option.value = item.id;
-    option.textContent = item.source.name + ' · ' + new Date(item.startedAt).toLocaleTimeString();
+    option.textContent = `${item.source.name} · ${item.source.in.toFixed(1)}–${item.source.out.toFixed(1)}초 · ${new Date(item.startedAt).toLocaleTimeString()}`;
     $('jobs').appendChild(option);
   }
   if (preferredId && completed.some((item) => item.id === preferredId))
@@ -488,7 +498,12 @@ $('connection-file').onclick = safe(async () => {
 
 $('source').onclick = safe(async () => {
   if (isAnalyzing() || generating) throw Error('현재 작업을 완료하거나 취소하세요.');
-  source = await api('sources', 'POST', await host.selectedSource());
+  const selected = await host.selectedSources();
+  const loaded = [];
+  for (const item of selected) loaded.push(await api('sources', 'POST', item));
+  sources = loaded;
+  source = sources[0];
+  batchJobs = [];
   applySourceKdaDefault();
   applySourceFlashDefault();
   $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 120));
@@ -496,10 +511,8 @@ $('source').onclick = safe(async () => {
   job = null;
   renderEvents();
   clearProgress();
-  setSourceInfo(
-    `${source.name}\n${source.in.toFixed(2)}–${source.out.toFixed(2)}초 · ${source.width}×${source.height} · ${source.fpsNum / source.fpsDen}fps`,
-  );
-  showMessage('소스를 불러왔습니다. HUD 영역을 확인한 뒤 분석하세요.');
+  setSourceInfo(describeSources(sources));
+  showMessage(`${sources.length}개 소스를 불러왔습니다. HUD 영역을 확인한 뒤 분석하세요.`);
 });
 
 $('review').onclick = safe(async () => {
@@ -557,6 +570,48 @@ $('flash-test').onclick = safe(async () => {
 $('analyze').onclick = safe(async () => {
   if (!source) throw Error('선택 클립을 먼저 불러오세요.');
   readSettings();
+  if (sources.length > 1) {
+    batchJobs = [];
+    batchCancelled = false;
+    batchRunning = true;
+    updateControls();
+    const failures = [];
+    try {
+      for (const [index, selected] of sources.entries()) {
+        if (batchCancelled) break;
+        source = selected;
+        applySourceKdaDefault();
+        applySourceFlashDefault();
+        job = await api('jobs', 'POST', {
+          sourceId: source.id,
+          roi: readRoi(),
+          clockRoi: readRoi('clock', '시계 HUD'),
+          flash: readFlashOptions(),
+          workers: $('workers').value,
+          interval: 0.5,
+        });
+        while (job.status === 'running') {
+          setProgress(`${index + 1}/${sources.length} · ${job.stage}`, job.progress || 0);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          job = await api('jobs/' + job.id);
+        }
+        if (job.status === 'done') batchJobs.push(job.id);
+        else if (!batchCancelled) failures.push(`${selected.name}: ${job.error || job.status}`);
+        renderEvents();
+        await refreshJobs(job.status === 'done' ? job.id : undefined);
+      }
+    } finally {
+      batchRunning = false;
+      updateControls();
+    }
+    clearProgress();
+    showMessage(
+      `${batchJobs.length}/${sources.length}개 클립 분석 완료${batchCancelled ? ' · 취소됨' : ''}` +
+        (failures.length ? `\n${failures.join('\n')}` : '\n완료된 작업을 검토한 뒤 시퀀스를 생성하세요.'),
+      failures.length > 0,
+    );
+    return;
+  }
   job = await api('jobs', 'POST', {
     sourceId: source.id,
     roi: readRoi(),
@@ -574,6 +629,7 @@ $('analyze').onclick = safe(async () => {
 
 $('cancel').onclick = safe(async () => {
   cancelGeneration = true;
+  batchCancelled = true;
   if (isAnalyzing()) await api('jobs/' + job.id + '/cancel', 'POST', {});
   showMessage('취소를 요청했습니다.');
 });
@@ -596,6 +652,10 @@ $('load-job').onclick = safe(async () => {
   if (!id) throw Error('불러올 작업을 선택하세요.');
   job = await api('jobs/' + id);
   source = job.source;
+  if (!batchJobs.includes(id)) {
+    batchJobs = [];
+    sources = [source];
+  }
   setSettings(job.settings);
   for (const key of ['x', 'y', 'width', 'height'])
     $(key).value = String(job.options.roi[key] * 100);
@@ -615,20 +675,39 @@ $('load-job').onclick = safe(async () => {
   for (const key of ['x', 'y', 'width', 'height'])
     $('clock-' + key).value = String(clockRoi[key] * 100);
   $('clock-time').value = String(Math.min(source.out - 1 / source.fpsNum, source.in + 120));
-  setSourceInfo(
-    `${source.name}\n${source.in.toFixed(2)}–${source.out.toFixed(2)}초 · ${source.width}×${source.height}`,
-  );
+  setSourceInfo(describeSources(sources));
   renderEvents();
   clearProgress();
   showMessage('저장된 작업과 수정 사항을 불러왔습니다.');
 });
 
 $('generate').onclick = safe(async () => {
-  if (!job || job.status !== 'done') throw Error('완료된 작업을 불러오세요.');
+  if ((!job || job.status !== 'done') && !batchJobs.length)
+    throw Error('완료된 작업을 불러오세요.');
   generating = true;
   cancelGeneration = false;
   updateControls();
   try {
+    if (batchJobs.length > 1 || (sources.length > 1 && batchJobs.length)) {
+      const plans = [];
+      for (const [index, id] of batchJobs.entries()) {
+        setProgress(`${index + 1}/${batchJobs.length} · 컷 계획 준비`, 0);
+        const plan = await api('jobs/' + id + '/plan', 'POST', { settings: readSettings() });
+        if (!plan.clips.length) throw Error(`${plan.source.name}: 생성할 컷이 없습니다.`);
+        plans.push(plan);
+      }
+      const combined = host.combinePlans(plans);
+      const result = await host.generate(combined, {
+        isCancelled: () => cancelGeneration,
+        onProgress: setProgress,
+      });
+      setProgress('시퀀스 생성 완료', 1);
+      showMessage(
+        `${batchJobs.length}개 원본을 합쳐 시퀀스 1개를 생성했습니다.\n` +
+          `${result.name} · ${result.clips}개 컷 · 프로젝트 폴더: ${result.binName}`,
+      );
+      return;
+    }
     job = await api('jobs/' + job.id);
     const plan = await api('jobs/' + job.id + '/plan', 'POST', { settings: readSettings() });
     if (!plan.clips.length) throw Error('생성할 컷이 없습니다.');
@@ -639,7 +718,7 @@ $('generate').onclick = safe(async () => {
     });
     setProgress('시퀀스 생성 완료', 1);
     showMessage(
-      `${result.name}\n${result.clips}개 컷, 오디오 ${result.audioTracks}개 트랙을 생성하고 검증했습니다.`,
+      `${result.name}\n${result.clips}개 컷, 오디오 ${result.audioTracks}개 트랙을 생성하고 검증했습니다.\n프로젝트 폴더: ${result.binName}`,
     );
   } finally {
     generating = false;

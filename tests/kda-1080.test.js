@@ -14,11 +14,12 @@ import {
 import { readFlash } from '../engine/flash.js';
 import { ocrPool, readKda } from '../engine/analyzer.js';
 
-test('1080p defaults include the first KDA digit and migrate legacy panel percentages', () => {
+test('KDA defaults return to the original crop and migrate the shifted 1080p preset', () => {
   const source = { width: 1920, height: 1080 };
-  assert.deepEqual(defaultKdaRoi(source), DEFAULT_ROI_1080);
+  assert.deepEqual(defaultKdaRoi(source), DEFAULT_ROI);
   assert.deepEqual(defaultKdaRoi({ width: 2560, height: 1440 }), DEFAULT_ROI);
-  assert.deepEqual(resolveKdaRoi(source, { ...DEFAULT_ROI, height: 2.2 / 100 }), DEFAULT_ROI_1080);
+  assert.deepEqual(resolveKdaRoi(source, { ...DEFAULT_ROI_1080, height: 2.2 / 100 }), DEFAULT_ROI);
+  assert.deepEqual(resolveKdaRoi(source, DEFAULT_ROI), DEFAULT_ROI);
   const custom = { ...DEFAULT_ROI, x: 0.84 };
   assert.deepEqual(resolveKdaRoi(source, custom), custom);
   assert.notEqual(cacheKey(source, DEFAULT_ROI, 0.5), cacheKey(source, DEFAULT_ROI_1080, 0.5));

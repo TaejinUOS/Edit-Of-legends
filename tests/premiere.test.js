@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { planClips } from '../engine/core.js';
 const { adapter } = createRequire(import.meta.url)('../plugin/premiere.js');
 // SDK-shaped fake tests the adapter's edit policy. It is not a Premiere integration test.
-function fixture({ failInsert = false } = {}) {
+function fixture({ failInsert = false, failMove = false } = {}) {
   const items = [],
     sequences = [],
     transactions = [];
@@ -16,20 +16,48 @@ function fixture({ failInsert = false } = {}) {
     if (!inLock) throw Error('Requires locked access');
     return fn;
   };
-  const item = {
-    name: 'game.mp4',
-    type: 1,
-    path: 'C:/game.mp4',
-    isSequence: async () => false,
-    isOffline: async () => false,
-    getMediaFilePath: async () => item.path,
-    getParentBin: () => root,
-    createSubClipAction: (name, start, end) =>
-      action(() => items.push({ ...item, name, length: end.seconds - start.seconds })),
+  const makeSource = (path) => {
+    const item = {
+      name: path.split('/').at(-1),
+      type: 1,
+      path,
+      isSequence: async () => false,
+      isOffline: async () => false,
+      getMediaFilePath: async () => item.path,
+      getParentBin: () => root,
+      createSubClipAction: (name, start, end) =>
+        action(() => items.push({ ...item, name, length: end.seconds - start.seconds })),
+    };
+    return item;
   };
+  const item = makeSource('C:/game.mp4');
   items.push(item);
   const root = {
     getItems: async () => items,
+    createBinAction: (name) =>
+      action(() => {
+        const binItems = [];
+        const bin = {
+          name,
+          getItems: async () => binItems,
+          getParentBin: () => root,
+          createRemoveItemAction: (target) =>
+            action(() => {
+              const index = binItems.indexOf(target);
+              if (index >= 0) binItems.splice(index, 1);
+            }),
+        };
+        items.push(bin);
+      }),
+    createMoveItemAction: (target, bin) =>
+      action(() => {
+        if (failMove) throw Error('move failed');
+        const index = items.indexOf(target);
+        if (index < 0) throw Error('source item missing');
+        items.splice(index, 1);
+        target.getParentBin = () => bin;
+        bin.getItems().then((children) => children.push(target));
+      }),
     createRemoveItemAction: (target) =>
       action(() => {
         const index = items.indexOf(target);
@@ -141,7 +169,7 @@ function fixture({ failInsert = false } = {}) {
       getActiveProject: async () => project,
       getProject: (guid) => (guid === project.guid ? project : null),
     },
-    FolderItem: { cast: (x) => (x === root ? root : null) },
+    FolderItem: { cast: (x) => (x && typeof x.getItems === 'function' ? x : null) },
     ClipProjectItem: {
       cast: (x) => {
         const cast = Object.create(x);
@@ -185,6 +213,7 @@ function fixture({ failInsert = false } = {}) {
   return {
     host: adapter(ppro),
     items,
+    addSource: (path) => items.push(makeSource(path)),
     sequences,
     transactions,
     get created() {
@@ -216,6 +245,41 @@ function plan() {
     source,
   };
 }
+
+test('selected timeline videos return every source range in timeline order', async () => {
+  const selected = (path, start, inPoint, outPoint) => ({
+    getIsSelected: async () => true,
+    getStartTime: async () => ({ seconds: start }),
+    getSpeed: async () => 1,
+    isSpeedReversed: async () => false,
+    getProjectItem: async () => ({
+      isSequence: async () => false,
+      isMulticamClip: async () => false,
+      isMergedClip: async () => false,
+      isOffline: async () => false,
+      getMediaFilePath: async () => path,
+    }),
+    getInPoint: async () => ({ seconds: inPoint }),
+    getOutPoint: async () => ({ seconds: outPoint }),
+  });
+  const tracks = [
+    { getTrackItems: async () => [selected('C:/second.mp4', 20, 30, 40)] },
+    { getTrackItems: async () => [selected('C:/first.mp4', 0, 5, 15)] },
+  ];
+  const sequence = {
+    getVideoTrackCount: async () => tracks.length,
+    getVideoTrack: async (index) => tracks[index],
+  };
+  const host = adapter({
+    Project: { getActiveProject: async () => ({ getActiveSequence: async () => sequence }) },
+    ClipProjectItem: { cast: (item) => item },
+    Constants: { TrackItemType: { CLIP: 1 } },
+  });
+  assert.deepEqual(await host.selectedSources(), [
+    { path: 'C:/first.mp4', in: 5, out: 15 },
+    { path: 'C:/second.mp4', in: 30, out: 40 },
+  ]);
+});
 test('host creates a NEW validated timeline with correct tracks and synced audio', async () => {
   const f = fixture(),
     result = await f.host.generate(plan());
@@ -226,11 +290,51 @@ test('host creates a NEW validated timeline with correct tracks and synced audio
   assert.equal(f.created.video[1].items.length, 1);
   assert.equal(f.created.video[2].items.length, 1);
   assert.equal(f.items[0].name, 'game.mp4');
-  assert.match(f.items[1].name, /^EOL_1번클립\(오프닝\)_[a-z0-9_]+$/);
-  assert.match(f.items[2].name, /^EOL_2번클립\(킬\)_[a-z0-9_]+$/);
-  assert.match(f.items[3].name, /^EOL_3번클립\(데스\)_[a-z0-9_]+$/);
-  assert.match(f.items[4].name, /^EOL_4번클립\(어시\)_[a-z0-9_]+$/);
+  const bin = f.items[1];
+  assert.equal(bin.name, result.binName);
+  const clips = await bin.getItems();
+  assert.equal(clips.length, 4);
+  assert.match(clips[0].name, /^EOL_1번클립\(오프닝\)_[a-z0-9_]+$/);
+  assert.match(clips[1].name, /^EOL_2번클립\(킬\)_[a-z0-9_]+$/);
+  assert.match(clips[2].name, /^EOL_3번클립\(데스\)_[a-z0-9_]+$/);
+  assert.match(clips[3].name, /^EOL_4번클립\(어시\)_[a-z0-9_]+$/);
   assert.ok(!f.created.name.includes('INCOMPLETE'));
+});
+
+test('multiple source plans produce one sequence and one subclip bin', async () => {
+  const f = fixture();
+  f.addSource('C:/other.mp4');
+  const first = plan();
+  const second = {
+    ...plan(),
+    source: { ...first.source, path: 'C:/other.mp4', name: 'other.mp4' },
+  };
+  const combined = f.host.combinePlans([first, second]);
+  assert.equal(combined.clips.length, 8);
+  assert.equal(combined.clips[4].sourceIndex, 1);
+  assert.equal(combined.clips[4].outputInFrame, first.frames);
+  const result = await f.host.generate(combined);
+  assert.equal(f.sequences.length, 1);
+  assert.equal(result.clips, 8);
+  const bin = f.items.find((item) => item.name === result.binName);
+  const clips = await bin.getItems();
+  assert.equal(clips.length, 8);
+  assert.equal(clips[0].path, 'C:/game.mp4');
+  assert.equal(clips[4].path, 'C:/other.mp4');
+});
+
+test('combined sequence rejects mismatched FPS or audio channels', () => {
+  const host = fixture().host;
+  const first = plan();
+  const slowerSource = { ...first.source, fpsNum: 30 };
+  const slower = { ...planClips([{ id: '1', type: 'kill', time: 230 }], slowerSource), source: slowerSource };
+  assert.throws(
+    () => host.combinePlans([first, slower]),
+    /FPS와 오디오/,
+  );
+  const second = plan();
+  second.source = { ...second.source, audio: [{ channels: 1 }] };
+  assert.throws(() => host.combinePlans([first, second]), /FPS와 오디오/);
 });
 test('host failures remove the incomplete sequence and generated subclips', async () => {
   const f = fixture({ failInsert: true });
@@ -242,6 +346,13 @@ test('host failures remove the incomplete sequence and generated subclips', asyn
   );
 });
 
+test('folder move failure removes generated clips, sequence, and empty bin', async () => {
+  const f = fixture({ failMove: true });
+  await assert.rejects(() => f.host.generate(plan()), /move failed/);
+  assert.equal(f.sequences.length, 0);
+  assert.deepEqual(f.items.map((item) => item.name), ['game.mp4']);
+});
+
 test('flash clips create V4 with the flash label and synchronized audio', async () => {
   const f = fixture();
   const source = plan().source;
@@ -249,7 +360,7 @@ test('flash clips create V4 with the flash label and synchronized audio', async 
   const result = await f.host.generate(edit);
   assert.equal(result.clips, 2);
   assert.equal(f.created.video[3].items.length, 1);
-  assert.match(f.items[2].name, /2번클립\(점멸\)/);
+  assert.match((await f.items[1].getItems())[1].name, /2번클립\(점멸\)/);
   assert.equal(result.audioTracks, 1);
 });
 test('cancel before sequence creation leaves source untouched', async () => {
