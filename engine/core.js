@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto';
 export const VERSION = '0.2.3';
 // Bump only when OCR, sampling, event detection, or cached result compatibility changes.
 // App releases and performance-only changes must not invalidate analysis results.
-export const ANALYSIS_REVISION = 5;
+export const ANALYSIS_REVISION = 6;
 export const TYPES = ['kill', 'death', 'assist', 'flash'];
 export const TRACKS = { kill: 0, assist: 1, death: 2, flash: 3 };
+export const CLIP_TYPE_PRIORITY = { death: 0, flash: 1, kill: 2, assist: 3 };
 export const FLASH_ROIS = {
   D: { x: 0.516, y: 0.916, width: 0.015, height: 0.026 },
   F: { x: 0.535, y: 0.916, width: 0.015, height: 0.026 },
@@ -143,15 +144,29 @@ export function detectEvents(samples, interval = 0.5) {
     }
     readable++;
     const key = s.kda.join('/');
-    if (!pending || pending.key !== key) pending = { key, first: s.time, count: 1, kda: s.kda };
-    else pending.count++;
-    if (pending.count < 2 || stopped) continue;
+    if (!pending || pending.key !== key || s.time - pending.last > interval * 1.5)
+      pending = { key, first: s.time, last: s.time, count: 1, confidence: s.confidence, kda: s.kda };
+    else {
+      pending.count++;
+      pending.last = s.time;
+      pending.confidence = Math.min(pending.confidence, s.confidence);
+    }
+    if (pending.count < 2) continue;
     if (!baseline) {
       baseline = [...s.kda];
       lastStable = s.time;
       continue;
     }
     const delta = s.kda.map((v, i) => v - baseline[i]);
+    if (stopped) {
+      // Resume only from a sustained, confident continuation of the old score.
+      // Preserve lastStable so increases across the gap still require review.
+      if (pending.count < 4 || pending.confidence < 80 || delta.some((v) => v < 0 || v > 3))
+        continue;
+      stopped = false;
+      warnings.at(-1).resumedAt = pending.first;
+      warnings.at(-1).message = 'K/D/A 오독 의심 구간 이후 정상 판독을 확인해 탐지를 재개했습니다. 공백 구간의 사건은 확인이 필요합니다.';
+    }
     // A confirmed correction shortly afterwards invalidates a transient OCR jump.
     // Look ahead only within ten seconds; never fabricate an event timestamp.
     if (delta.some((v) => v !== 0)) {
@@ -185,7 +200,7 @@ export function detectEvents(samples, interval = 0.5) {
       if (pending.count >= 4) {
         warnings.push({
           time: pending.first,
-          message: 'K/D/A 감소가 지속됩니다. 화면 전환 이후 자동 확정을 중단했습니다.',
+          message: 'K/D/A 감소가 지속되어 자동 확정을 보류했습니다. 정상 판독이 확인되면 재개합니다.',
         });
         stopped = true;
       }
@@ -298,7 +313,9 @@ export function planClips(events, source, settings = {}) {
   let cursor = 0;
   for (const c of clips) {
     if (c.type !== 'opening')
-      c.type = [...c.events].sort((a, b) => TRACKS[a.type] - TRACKS[b.type])[0].type;
+      c.type = [...c.events].sort(
+        (a, b) => CLIP_TYPE_PRIORITY[a.type] - CLIP_TYPE_PRIORITY[b.type],
+      )[0].type;
     c.track = c.type === 'opening' ? 0 : TRACKS[c.type];
     c.eventIds = c.events.map((e) => e.id);
     delete c.events;

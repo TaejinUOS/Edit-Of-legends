@@ -26,7 +26,14 @@ function fixture({ failInsert = false, failMove = false } = {}) {
       getMediaFilePath: async () => item.path,
       getParentBin: () => root,
       createSubClipAction: (name, start, end) =>
-        action(() => items.push({ ...item, name, length: end.seconds - start.seconds })),
+        action(() => {
+          const subclip = { ...item, name, length: end.seconds - start.seconds };
+          subclip.createSetColorLabelAction = (label) =>
+            action(() => {
+              subclip.label = label;
+            });
+          items.push(subclip);
+        }),
     };
     return item;
   };
@@ -179,7 +186,11 @@ function fixture({ failInsert = false, failMove = false } = {}) {
     },
     FrameRate: { createWithValue: (x) => x },
     TickTime: { createWithFrameAndFrameRate: (f, r) => time(f / r) },
-    Constants: { TrackItemType: { CLIP: 1 }, MediaType: { ANY: 0, VIDEO: 1, AUDIO: 2 } },
+    Constants: {
+      TrackItemType: { CLIP: 1 },
+      MediaType: { ANY: 0, VIDEO: 1, AUDIO: 2 },
+      ProjectItemColorLabel: { FOREST: 4 },
+    },
     TrackItemSelection: {
       createEmptySelection: () => {
         throw Error('detached TrackItemSelection is rejected by Premiere 26.5');
@@ -294,6 +305,7 @@ test('host creates a NEW validated timeline with correct tracks and synced audio
   assert.equal(bin.name, result.binName);
   const clips = await bin.getItems();
   assert.equal(clips.length, 4);
+  assert.ok(clips.every((clip) => clip.label === 4));
   assert.match(clips[0].name, /^EOL_1번클립\(오프닝\)_[a-z0-9_]+$/);
   assert.match(clips[1].name, /^EOL_2번클립\(킬\)_[a-z0-9_]+$/);
   assert.match(clips[2].name, /^EOL_3번클립\(데스\)_[a-z0-9_]+$/);
@@ -340,17 +352,17 @@ test('host failures remove the incomplete sequence and generated subclips', asyn
   const f = fixture({ failInsert: true });
   await assert.rejects(() => f.host.generate(plan()), /EOL 항목을 정리했습니다/);
   assert.equal(f.sequences.length, 0);
-  assert.deepEqual(
-    f.items.map((item) => item.name),
-    ['game.mp4'],
-  );
+  assert.deepEqual(f.items.map((item) => item.name), ['game.mp4']);
 });
 
 test('folder move failure removes generated clips, sequence, and empty bin', async () => {
   const f = fixture({ failMove: true });
   await assert.rejects(() => f.host.generate(plan()), /move failed/);
   assert.equal(f.sequences.length, 0);
-  assert.deepEqual(f.items.map((item) => item.name), ['game.mp4']);
+  assert.deepEqual(
+    f.items.map((item) => item.name),
+    ['game.mp4'],
+  );
 });
 
 test('flash clips create V4 with the flash label and synchronized audio', async () => {

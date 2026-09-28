@@ -12,7 +12,7 @@ import {
   DEFAULT_CLOCK_ROI,
   flashOptions,
 } from './core.js';
-import { readFlash, detectFlashEvents } from './flash.js';
+import { readFlash, detectFlashEvents, calibrateFlash } from './flash.js';
 import { sampleFrames, verifyCfr } from './media.js';
 import { createClockSampler } from './clock-sampling.js';
 import { glyphImages } from './ocr-image.js';
@@ -224,6 +224,10 @@ export async function analyze(source, options, signal, onProgress = () => {}, { 
       resetCaches(pool);
       signal?.throwIfAborted();
       await writeDecoderProfile(profileLocation, decoderThreads);
+    }
+    if (flash.enabled) {
+      onProgress({ stage: '점멸 HUD 위치 확인', progress: 0.05, workers });
+      Object.assign(flash, await calibrateFlash(source, flash.roi, signal, decoderThreads));
     }
     const clockSampler = createClockSampler(
       source,

@@ -10,3 +10,7 @@ Captured using the same grayscale multi-region sampling path as analysis:
 - `other-spell.png`: D slot, source 120 s; not Flash.
 
 The engine reference `engine/assets/flash-ready.png` is the F-slot crop at source 180 s.
+
+`tf-yone-ready-search.png` is a 44×44 HUD-only crop from `트페vs요네.mp4`
+(1920×1080), source 100 s, at pixel (1019, 981). The 28×28 ready icon
+aligns at (3, 11) inside this crop; the former configured position was (8, 8).

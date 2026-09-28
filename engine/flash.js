@@ -1,11 +1,53 @@
 import sharp from 'sharp';
 import { readFile } from 'node:fs/promises';
-import { parseGameClock } from './core.js';
+import { parseGameClock, roiPixels } from './core.js';
+import { sampleFrames } from './media.js';
 
 // Ready-state reference cropped from the user's sample, excluding the F key label.
 const reference = readFile(new URL('./assets/flash-ready.png', import.meta.url)).then((png) =>
   sharp(png).resize(8, 8).grayscale().raw().toBuffer(),
 );
+
+export async function locateFlash(raw, info, crop, signal) {
+  const template = await reference;
+  const image = sharp(raw, { raw: { width: info.width, height: info.height, channels: 1 } });
+  let best = null;
+  for (let y = 0; y <= info.height - crop.height; y++) {
+    signal?.throwIfAborted();
+    for (let x = 0; x <= info.width - crop.width; x++) {
+      const pixels = await image.clone()
+        .extract({ left: x, top: y, width: crop.width, height: crop.height })
+        .resize(8, 8).grayscale().raw().toBuffer();
+      const difference = pixels.reduce((sum, v, i) => sum + Math.abs(v - template[i]), 0) / (64 * 255);
+      if (!best || difference < best.difference) best = { x, y, difference };
+    }
+  }
+  return best;
+}
+
+export async function calibrateFlash(source, roi, signal, threads = 4) {
+  const crop = roiPixels(roi, source.width, source.height);
+  const margin = Math.ceil(8 * source.width / 1920);
+  const left = Math.max(0, crop.x - margin), top = Math.max(0, crop.y - margin);
+  const width = Math.min(source.width, crop.x + crop.width + margin) - left;
+  const height = Math.min(source.height, crop.y + crop.height + margin) - top;
+  const expanded = { x: left / source.width, y: top / source.height,
+    width: width / source.width, height: height / source.height };
+  let previous = null;
+  // Sparse preflight stops after two matching ready icons. Cooldowns and death
+  // screens cannot establish alignment; fall back to the supplied ROI if absent.
+  for await (const frame of sampleFrames(source, expanded, 30, signal, threads)) {
+    const match = await locateFlash(frame.raw, frame, crop, signal);
+    if (!match || match.difference >= 0.10) { previous = null; continue; }
+    if (previous && match.x === previous.x && match.y === previous.y) {
+      return { roi: { x: (left + match.x) / source.width, y: (top + match.y) / source.height,
+        width: crop.width / source.width, height: crop.height / source.height },
+        calibrated: true, offset: { x: left + match.x - crop.x, y: top + match.y - crop.y } };
+    }
+    previous = match;
+  }
+  return { roi, calibrated: false, offset: { x: 0, y: 0 } };
+}
 
 export function parseCooldown(text) {
   const value = text.trim().replace(/\s/g, '');

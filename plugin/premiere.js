@@ -270,6 +270,13 @@ function adapter(ppro) {
         ppro.ClipProjectItem.cast(item);
         return item;
       });
+      // Premiere chooses the timeline name's text color from the clip label.
+      // A dark label keeps generated clip names legible in the timeline.
+      transaction(project, 'EditOfLegends: 클립 레이블 지정', () =>
+        media.map((item) =>
+          item.createSetColorLabelAction(ppro.Constants.ProjectItemColorLabel.FOREST),
+        ),
+      );
       originals = await Promise.all(sources.map((source) => findSource(root, source.path, names)));
       if (originals.some((item) => !item)) throw Error('원본 클립을 다시 찾을 수 없습니다.');
       if (isCancelled()) throw Error('시퀀스 생성을 취소했습니다.');

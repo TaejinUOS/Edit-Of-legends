@@ -139,6 +139,25 @@ test('unreadable and readable no-event videos are distinct', () => {
     [0, 0, 0],
   );
 });
+
+test('sustained OCR decrease pauses, then stable continuation restores later deaths', () => {
+  const values = [sample(0, [8, 3, 5]), sample(0.5, [8, 3, 5]),
+    ...Array.from({ length: 30 }, (_, i) => sample(1 + i * 0.5, [7, 3, 2], 71)),
+    ...Array.from({ length: 4 }, (_, i) => sample(16 + i * 0.5, [10, 3, 5])),
+    sample(18, [10, 4, 5]), sample(18.5, [10, 4, 5])];
+  const result = detectEvents(values);
+  assert.equal(result.stopped, false);
+  assert.deepEqual(result.finalKda, [10, 4, 5]);
+  assert.equal(result.events[0].review, true);
+  assert.equal(result.events[0].included, false);
+  assert.deepEqual(result.events[0].range, [0.5, 16]);
+  assert.equal(result.events[1].type, 'death');
+  assert.equal(result.events[1].time, 18);
+  assert.equal(result.events[1].included, true);
+  assert.equal(result.warnings[0].resumedAt, 16);
+  const weak = values.map(s => s.time >= 16 ? { ...s, confidence: 70 } : s);
+  assert.equal(detectEvents(weak).stopped, true);
+});
 test('the opening window is always the first clip, even with every event type disabled', () => {
   const timed = { ...source, out: 400, openingWindow: { in: 50, out: 210 } };
   const p = planClips([e('kill', 230)], timed, { types: [] });
@@ -190,13 +209,14 @@ test('the opening respects trimmed and short source bounds', () => {
   assert.deepEqual([short.clips[0].in, short.clips[0].out], [30, 90]);
   assert.equal(short.clips.length, 1);
 });
-test('PRD chained event example produces one 30 second kill clip', () => {
+test('chained events produce one 30 second death clip', () => {
   const p = planClips([e('kill', 280), e('assist', 288), e('death', 292)], { ...source, out: 400 });
   assert.equal(p.clips.length, 2);
   assert.equal(p.clips[1].in, 269);
   assert.equal(p.clips[1].out, 299);
   assert.equal(p.duration, 210);
-  assert.equal(p.clips[1].track, 0);
+  assert.equal(p.clips[1].type, 'death');
+  assert.equal(p.clips[1].track, 2);
   assert.equal(p.clips[1].eventIds.length, 3);
 });
 test('type filters apply BEFORE grouping and precedence', () => {
@@ -214,7 +234,29 @@ test('type filters apply BEFORE grouping and precedence', () => {
 test('overlapping handles merge even when simultaneous window is zero', () => {
   const p = planClips([e('death', 230), e('kill', 240)], { ...source, out: 400 }, { gap: 0 });
   assert.equal(p.clips.length, 2);
-  assert.equal(p.clips[1].track, 0);
+  assert.equal(p.clips[1].type, 'death');
+  assert.equal(p.clips[1].track, 2);
+});
+
+test('overlapping clips use death, flash, kill, assist priority regardless of event order', () => {
+  const extended = { ...source, out: 400 };
+  const cases = [
+    { types: ['kill', 'death'], winner: 'death', track: 2 },
+    { types: ['kill', 'flash'], winner: 'flash', track: 3 },
+    { types: ['assist', 'kill'], winner: 'kill', track: 0 },
+    { types: ['assist', 'flash'], winner: 'flash', track: 3 },
+  ];
+  for (const { types, winner, track } of cases) {
+    for (const order of [types, [...types].reverse()]) {
+      const clip = planClips(
+        order.map((type) => e(type, 240)),
+        extended,
+      ).clips[1];
+      assert.equal(clip.type, winner);
+      assert.equal(clip.track, track);
+      assert.equal(clip.eventIds.length, 2);
+    }
+  }
 });
 test('all tracks share the contiguous output clock', () => {
   const p = planClips([e('death', 230), e('assist', 290), e('kill', 350)], { ...source, out: 400 });

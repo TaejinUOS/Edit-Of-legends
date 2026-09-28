@@ -380,7 +380,7 @@ select:focus { border-color: #7e8e37; }
   height: 12px;
   margin: 0;
 }
-.event-copy { flex: 1 1 auto; font-weight: 700; }
+.event .event-copy { flex: 1 1 auto; color: #f5f5f7; font-weight: 700; }
 .event small { flex: 0 0 auto; color: #d7d7de; font-size: 10px; }
 .event time { color: #d7d7de; }
 

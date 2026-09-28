@@ -2,12 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { ocrPool } from '../engine/analyzer.js';
-import { readFlash, detectFlashEvents, parseCooldown } from '../engine/flash.js';
+import { readFlash, detectFlashEvents, parseCooldown, locateFlash } from '../engine/flash.js';
+import sharp from 'sharp';
 import { flashOptions, FLASH_ROIS, cacheKey, DEFAULT_ROI, planClips } from '../engine/core.js';
 
 const ready = (time) => ({ time, state: 'ready', confidence: 95 });
 const cd = (time, cooldown) => ({ time, state: 'cooldown', cooldown, confidence: 90 });
 const unknown = (time) => ({ time, state: 'unknown', confidence: 0 });
+
+test('real shifted F icon is located without widening the ready-state threshold', async () => {
+  const image = sharp(await readFile(new URL('./fixtures/flash/tf-yone-ready-search.png', import.meta.url)));
+  const { data, info } = await image.grayscale().raw().toBuffer({ resolveWithObject: true });
+  const match = await locateFlash(data, info, { width: 28, height: 28 });
+  assert.deepEqual([match.x, match.y], [3, 11]);
+  assert.ok(match.difference < 0.10);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(locateFlash(data, info, { width: 28, height: 28 }, controller.signal));
+});
 
 test('flash requires readiness followed by a persistent decreasing cooldown', () => {
   const events = detectFlashEvents([
@@ -87,7 +99,7 @@ test('flash gets V4, merges with KDA events, and never duplicates the opening', 
   const plan = planClips(events, source);
   assert.deepEqual(
     plan.clips.map((c) => c.type),
-    ['opening', 'flash', 'kill'],
+    ['opening', 'flash', 'flash'],
   );
   assert.equal(plan.clips[1].track, 3);
   assert.deepEqual(plan.clips[2].eventIds, ['f2', 'k1']);
