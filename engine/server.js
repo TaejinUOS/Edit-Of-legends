@@ -10,6 +10,7 @@ import { analyze, ocrPool, readKda, readGameClock } from './analyzer.js';
 import { readFlash } from './flash.js';
 import {
   VERSION,
+  TYPES,
   DEFAULT_ROI,
   defaultKdaRoi,
   defaultFlashRois,
@@ -17,6 +18,7 @@ import {
   DEFAULT_CLOCK_ROI,
   flashOptions,
   cacheKey,
+  selectDetectedEvents,
   planClips,
   trimPlan,
   normalizeEvents,
@@ -107,7 +109,8 @@ export async function createApp({
         if (!signal.aborted) await atomicJson(cacheFile, job.result);
       }
       if (signal.aborted) throw new Error('분석을 취소했습니다.');
-      job.events = job.result.events;
+      const selectedTypes = job.settings?.types ?? TYPES;
+      job.events = selectDetectedEvents(job.result.events, selectedTypes);
       job.status = 'done';
       job.stage = '분석 완료';
       job.progress = 1;
@@ -303,6 +306,10 @@ export async function createApp({
         if (active) return json(res, { error: '이미 분석 중인 작업이 있습니다.' }, 409);
         const b = await body(req),
           source = getSource(b.sourceId);
+        const settings = b.settings ?? {};
+        const selectedTypes = settings.types ?? TYPES;
+        if (!Array.isArray(selectedTypes) || selectedTypes.some((type) => !TYPES.includes(type)))
+          throw new Error('이벤트 유형이 올바르지 않습니다.');
         const options = {
           roi: resolveKdaRoi(source, b.roi),
           clockRoi: b.clockRoi ?? DEFAULT_CLOCK_ROI,
@@ -317,6 +324,7 @@ export async function createApp({
           id: randomUUID(),
           source,
           options,
+          settings,
           status: 'running',
           stage: '준비',
           progress: 0,

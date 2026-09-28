@@ -263,6 +263,13 @@ export function normalizeEvents(events, start, end) {
   });
 }
 
+export function selectDetectedEvents(events, types = TYPES) {
+  return events.map((event) => ({
+    ...event,
+    included: event.included !== false && types.includes(event.type),
+  }));
+}
+
 export function planClips(events, source, settings = {}) {
   const before = number(settings.before ?? 11, 'Before', 0, 120);
   const after = number(settings.after ?? 7, 'After', 0, 120);

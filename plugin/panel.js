@@ -568,7 +568,7 @@ $('flash-test').onclick = safe(async () => {
 
 $('analyze').onclick = safe(async () => {
   if (!source) throw Error('선택 클립을 먼저 불러오세요.');
-  readSettings();
+  const settings = readSettings();
   if (sources.length > 1) {
     batchJobs = [];
     batchCancelled = false;
@@ -583,6 +583,7 @@ $('analyze').onclick = safe(async () => {
         applySourceFlashDefault();
         job = await api('jobs', 'POST', {
           sourceId: source.id,
+          settings,
           roi: readRoi(),
           clockRoi: readRoi('clock', '시계 HUD'),
           flash: readFlashOptions(),
@@ -613,6 +614,7 @@ $('analyze').onclick = safe(async () => {
   }
   job = await api('jobs', 'POST', {
     sourceId: source.id,
+    settings,
     roi: readRoi(),
     clockRoi: readRoi('clock', '시계 HUD'),
     flash: readFlashOptions(),

@@ -56,8 +56,17 @@ test(
       assert.equal(first.options.flash.slot, 'F');
       assert.equal(first.result.openingWindow.in, 283);
       assert.equal(first.result.openingWindow.out, 293);
-      const second = await finish((await json('jobs', { sourceId: source.id, workers: 1 })).id);
+      const second = await finish(
+        (await json('jobs', {
+          sourceId: source.id,
+          workers: 1,
+          settings: { before: 11, after: 7, gap: 15, types: ['death'] },
+        })).id,
+      );
       assert.equal(second.cached, true);
+      assert.deepEqual(second.settings.types, ['death']);
+      assert.equal(second.events[0].included, false);
+      assert.equal(second.result.events[0].included, true);
       const long = await json('sources', { path: file });
       const flashPreview = await json('ocr', { sourceId: long.id, kind: 'flash', time: 300 });
       assert.equal(flashPreview.state, 'cooldown');

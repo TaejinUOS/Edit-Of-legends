@@ -5,6 +5,7 @@ import {
   detectEvents,
   parseKda,
   planClips,
+  selectDetectedEvents,
   trimPlan,
   roiPixels,
   cacheKey,
@@ -23,6 +24,23 @@ const source = {
 };
 const e = (type, time, id = type + time) => ({ type, time, id, amount: 1, included: true });
 const sample = (time, kda, confidence = 90) => ({ time, kda, confidence });
+test('analysis selection checks only chosen event types and preserves review exclusions', () => {
+  const detected = [
+    e('kill', 230),
+    e('death', 240),
+    e('assist', 250),
+    e('flash', 260),
+    { ...e('death', 270), included: false, review: true },
+  ];
+  const selected = selectDetectedEvents(detected, ['death', 'flash']);
+  assert.deepEqual(selected.map((event) => event.included), [false, true, false, true, false]);
+  assert.deepEqual(
+    planClips(selected, { ...source, out: 400, duration: 400 }).clips.map((clip) => clip.type),
+    ['opening', 'death', 'flash'],
+  );
+  assert.equal(detected[0].included, true);
+  assert.deepEqual(selectDetectedEvents(detected).map((event) => event.included), [true, true, true, true, false]);
+});
 test('KDA parser rejects concatenated numbers and unrelated text', () => {
   assert.deepEqual(parseKda(' 7 / 2 / 7\n'), [7, 2, 7]);
   for (const s of ['7127', '7/2/7 extra', '7/2', '7/2/777']) assert.equal(parseKda(s), null);
